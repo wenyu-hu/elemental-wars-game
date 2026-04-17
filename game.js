@@ -12,18 +12,15 @@ class PreloadScene extends Phaser.Scene {
   constructor() { super('PreloadScene'); }
 
   preload() {
-    // ── WHEN YOUR PISKEL ART IS READY ────────────────────────────────
-    // Drop your exported PNGs into the assets/ folder, then uncomment:
-    //
-    // this.load.spritesheet('player_idle',   'assets/idle.png',   { frameWidth: 32, frameHeight: 32 });
-    // this.load.spritesheet('player_walk',   'assets/walk.png',   { frameWidth: 32, frameHeight: 32 });
-    // this.load.spritesheet('player_jump',   'assets/jump.png',   { frameWidth: 32, frameHeight: 32 });
-    // this.load.spritesheet('player_attack', 'assets/attack.png', { frameWidth: 32, frameHeight: 32 });
-    // this.load.spritesheet('player_duck',   'assets/duck.png',   { frameWidth: 32, frameHeight: 32 });
-    // this.load.spritesheet('dummy',         'assets/dummy.png',  { frameWidth: 32, frameHeight: 32 });
-    // this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 32, frameHeight: 32 });
-    // this.load.image('ground',   'assets/ground.png');
-    // this.load.image('platform', 'assets/platform.png');
+    this.load.spritesheet('player_idle',   'assets/idle.png',   { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('player_walk',   'assets/walk.png',   { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('player_jump',   'assets/jump.png',   { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('player_attack', 'assets/attack.png', { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('player_duck',   'assets/duck.png',   { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('dummy',         'assets/dummy.png',  { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 32, frameHeight: 32 });
+    this.load.image('ground',   'assets/ground.png');
+    this.load.image('platform', 'assets/platform.png');
   }
 
   create() {
