@@ -12,13 +12,14 @@ class PreloadScene extends Phaser.Scene {
   constructor() { super('PreloadScene'); }
 
   preload() {
-    this.load.spritesheet('player_idle',   'assets/idle.png',   { frameWidth: 32, frameHeight: 32 });
-    this.load.spritesheet('player_walk',   'assets/walk.png',   { frameWidth: 32, frameHeight: 32 });
-    this.load.spritesheet('player_jump',   'assets/jump.png',   { frameWidth: 32, frameHeight: 32 });
-    this.load.spritesheet('player_attack', 'assets/attack.png', { frameWidth: 32, frameHeight: 32 });
-    this.load.spritesheet('player_duck',   'assets/duck.png',   { frameWidth: 32, frameHeight: 32 });
-    this.load.spritesheet('dummy',         'assets/dummy.png',  { frameWidth: 32, frameHeight: 32 });
-    this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 32, frameHeight: 32 });
+    // Frame sizes match the cropped assets (transparent padding removed)
+    this.load.spritesheet('player_idle',   'assets/idle.png',   { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('player_walk',   'assets/walk.png',   { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('player_jump',   'assets/jump.png',   { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('player_attack', 'assets/attack.png', { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('player_duck',   'assets/duck.png',   { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('dummy',         'assets/dummy.png',  { frameWidth: 27, frameHeight: 25 });
+    this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 14, frameHeight: 16 });
     this.load.image('ground',   'assets/ground.png');
     this.load.image('platform', 'assets/platform.png');
   }
@@ -75,15 +76,15 @@ class PreloadScene extends Phaser.Scene {
       this.textures.addCanvas(key, canvas);
     };
 
-    makeSheet('player_idle',   0x4488ff, 1);
-    makeSheet('player_walk',   0x4488ff, 4);
-    makeSheet('player_jump',   0x44aaff, 3);
-    makeSheet('player_attack', 0xff8844, 4);
-    makeSheet('player_duck',   0x2266cc, 1);
-    makeSheet('dummy',         0xcc4444, 2);
-    makeSheet('chest',         0xcc9922, 2);
-    makeImg  ('ground',        0x228822);
-    makeImg  ('platform',      0x886633);
+    makeSheet('player_idle',   0x4488ff, 1, 18, 31);
+    makeSheet('player_walk',   0x4488ff, 4, 18, 31);
+    makeSheet('player_jump',   0x44aaff, 3, 18, 31);
+    makeSheet('player_attack', 0xff8844, 4, 18, 31);
+    makeSheet('player_duck',   0x2266cc, 1, 18, 31);
+    makeSheet('dummy',         0xcc4444, 2, 27, 25);
+    makeSheet('chest',         0xcc9922, 2, 14, 16);
+    makeImg  ('ground',        0x228822, 32, 32);
+    makeImg  ('platform',      0x886633, 32,  6);
   }
 }
 
@@ -212,20 +213,17 @@ class GameScene extends Phaser.Scene {
 
     const floorY = worldH - TS / 2;
 
-    // Main floor with one gap players must jump or platform over
-    ground(0,            floorY, 18);
-    ground(18 * TS + 96, floorY, 12);
-    ground(35 * TS,      floorY, 18);
-    ground(55 * TS,      floorY, 6);
-    ground(62 * TS,      floorY, 100); // end stretch — dummy + chest zone
+    // Mostly-continuous floor with one small gap (1 tile wide) to hop
+    ground(0,        floorY, 16);   // 0 → 1536
+    ground(17 * TS,  floorY, 38);   // 1632 → 5280  (covers dummy at 2800, chest at 4600)
 
-    // Floating platforms
-    plat(10 * TS,       floorY - 3 * TS, 3);
-    plat(20 * TS,       floorY - 2 * TS, 3);
-    plat(28 * TS,       floorY - 4 * TS, 3);
-    plat(38 * TS,       floorY - 3 * TS, 3);
-    plat(46 * TS,       floorY - 2 * TS, 3);
-    plat(55 * TS + 96,  floorY - 3 * TS, 3); // bridge over gap
+    // Floating platforms — each is 1 tile, all reachable with 1 or 2 jumps
+    plat(8  * TS, floorY - 1 * TS, 1);   // single-jump height (~96px above floor)
+    plat(14 * TS, floorY - 2 * TS, 1);   // double-jump height (~192px)
+    plat(21 * TS, floorY - 1 * TS, 1);
+    plat(28 * TS, floorY - 2 * TS, 1);
+    plat(36 * TS, floorY - 1 * TS, 1);
+    plat(43 * TS, floorY - 2 * TS, 1);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -236,7 +234,9 @@ class GameScene extends Phaser.Scene {
       .setScale(SCALE)
       .setCollideWorldBounds(true);
 
-    sprite.body.setSize(20, 28).setOffset(6, 4);
+    // Body in texture-space units (Phaser multiplies by SCALE automatically)
+    // Texture is 18×31 after crop; body covers the main character silhouette
+    sprite.body.setSize(14, 27).setOffset(2, 2);
 
     return {
       sprite,
@@ -256,7 +256,8 @@ class GameScene extends Phaser.Scene {
       .setImmovable(true);
 
     sprite.body.setAllowGravity(false);
-    sprite.body.setSize(24, 30).setOffset(4, 2);
+    // Texture 27×25 after crop
+    sprite.body.setSize(23, 23).setOffset(2, 1);
 
     const maxHp = 5;
     return { sprite, hp: maxHp, maxHp, dead: false };
@@ -271,6 +272,8 @@ class GameScene extends Phaser.Scene {
       .setImmovable(true);
 
     sprite.body.setAllowGravity(false);
+    // Texture 14×16 after crop
+    sprite.body.setSize(12, 14).setOffset(1, 1);
     return { sprite, opened: false };
   }
 
@@ -402,10 +405,10 @@ class GameScene extends Phaser.Scene {
     const s     = p.sprite;
     if (k.left.isDown || k.a.isDown) {
       s.body.setVelocityX(-speed);
-      s.setFlipX(true);
+      s.setFlipX(false);   // sprite naturally faces left
     } else if (k.right.isDown || k.d.isDown) {
       s.body.setVelocityX(speed);
-      s.setFlipX(false);
+      s.setFlipX(true);    // flipped = faces right
     } else {
       s.body.setVelocityX(0);
     }
@@ -423,7 +426,8 @@ class GameScene extends Phaser.Scene {
       const ds     = this.dummy.sprite;
       const dx     = Math.abs(ps.x - ds.x);
       const dy     = Math.abs(ps.y - ds.y);
-      const facing = ps.flipX ? (ds.x < ps.x) : (ds.x > ps.x);
+      // flipX=true → facing right → target must be to the right
+      const facing = ps.flipX ? (ds.x > ps.x) : (ds.x < ps.x);
       if (dx < reach && dy < TS && facing) this.hitDummy();
     }
 
@@ -432,7 +436,7 @@ class GameScene extends Phaser.Scene {
       const cs     = this.chest.sprite;
       const dx     = Math.abs(ps.x - cs.x);
       const dy     = Math.abs(ps.y - cs.y);
-      const facing = ps.flipX ? (cs.x < ps.x) : (cs.x > ps.x);
+      const facing = ps.flipX ? (cs.x > ps.x) : (cs.x < ps.x);
       if (dx < reach && dy < TS && facing) this.openChest();
     }
   }
@@ -487,7 +491,7 @@ class GameScene extends Phaser.Scene {
     const bar  = this.dummyBar;
     const barW = 80;
     const bx   = ds.x;
-    const by   = ds.y - TS / 2 - 8;
+    const by   = ds.y - 25 * SCALE / 2 - 8;  // 25 = dummy texture height
 
     bar.bg.setPosition(bx, by).setSize(barW, 10);
 
