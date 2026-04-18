@@ -143,7 +143,7 @@ class GameScene extends Phaser.Scene {
 
     this.player = this.createPlayer(this._respawnX, this._respawnY);
     this.dummy  = this.createDummy(1800, groundTop - 25 * SCALE / 2);
-    this.chest  = this.createChest(3000, groundTop - 16 * SCALE / 2);
+    this.chest  = this.createChest(3000, groundTop - 16 * 5 / 2);   // scale=5 used below
 
     this.spikes = this.physics.add.staticGroup();
     this.buildSpikes(floorY);
@@ -378,7 +378,7 @@ class GameScene extends Phaser.Scene {
   }
 
   createChest(x, y) {
-    const sprite = this.physics.add.sprite(x, y, 'chest').setScale(SCALE).setImmovable(true);
+    const sprite = this.physics.add.sprite(x, y, 'chest').setScale(5).setImmovable(true);
     sprite.body.setAllowGravity(false).setSize(12, 14).setOffset(1, 1);
     return { sprite, opened: false };
   }
