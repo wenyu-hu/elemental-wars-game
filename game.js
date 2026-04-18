@@ -149,6 +149,10 @@ class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.player.sprite, this.platforms);
     this.physics.add.collider(this.dummy.sprite,  this.platforms);
     this.physics.add.collider(this.chest.sprite,  this.platforms);
+
+    // Make dummy and chest solid — without these the player passes right through
+    this.physics.add.collider(this.player.sprite, this.dummy.sprite);
+    this.physics.add.collider(this.player.sprite, this.chest.sprite);
     this.physics.add.overlap(
       this.player.sprite, this.spikes,
       () => this.respawnPlayer(), null, this
@@ -161,7 +165,8 @@ class GameScene extends Phaser.Scene {
     this.cameras.main.setZoom(0.65);
     this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
     this.cameras.main.startFollow(this.player.sprite, true, 0.12, 0.10);
-    this.cameras.main.setFollowOffset(0, 181);
+    // +107 lifts camera focus above player so ground occupies ~30% of screen height
+    this.cameras.main.setFollowOffset(0, 107);
 
     // Input
     this.keys = this.input.keyboard.addKeys({
