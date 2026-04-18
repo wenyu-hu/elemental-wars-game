@@ -126,9 +126,10 @@ class GameScene extends Phaser.Scene {
     const floorY    = WORLD_H - 4 * TS;       // grass tile centre  y = 816
     const groundTop = floorY - TS / 2;         // grass surface      y = 768
 
-    this._respawnX  = 120;
-    this._respawnY  = groundTop - 120;
-    this._spikeHit  = false;
+    this._respawnX    = 120;
+    this._respawnY    = groundTop - 120;
+    this._spikeHit    = false;
+    this._wasOnGround = true;   // tracks previous-frame ground state for landing detection
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
     this.cameras.main.setBackgroundColor(0xeef8ff);
@@ -283,6 +284,39 @@ class GameScene extends Phaser.Scene {
   // ─────────────────────────────────────────────────────────────────
   //  Respawn on spike contact
   // ─────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  //  Squash-and-stretch helpers
+  // ─────────────────────────────────────────────────────────────────
+  squashPlayer() {
+    const s = this.player.sprite;
+    this.tweens.killTweensOf(s);        // cancel any in-flight stretch
+    s.setScale(SCALE);                  // reset before tweening
+    this.tweens.add({
+      targets: s,
+      scaleX: SCALE * 1.35,
+      scaleY: SCALE * 0.70,
+      duration: 55,
+      yoyo: true,
+      ease: 'Sine.easeOut',
+      onComplete: () => s.setScale(SCALE),
+    });
+  }
+
+  stretchPlayer() {
+    const s = this.player.sprite;
+    this.tweens.killTweensOf(s);        // cancel any in-flight squash
+    s.setScale(SCALE);
+    this.tweens.add({
+      targets: s,
+      scaleX: SCALE * 0.75,
+      scaleY: SCALE * 1.30,
+      duration: 90,
+      yoyo: true,
+      ease: 'Sine.easeOut',
+      onComplete: () => s.setScale(SCALE),
+    });
+  }
+
   respawnPlayer() {
     if (this._spikeHit) return;
     this._spikeHit = true;
@@ -290,6 +324,9 @@ class GameScene extends Phaser.Scene {
     const p = this.player;
     p.isAttacking = false;
     p.sprite.body.setVelocity(0, 0);
+    // Kill any squash/stretch tween and reset scale before the death flash
+    this.tweens.killTweensOf(p.sprite);
+    p.sprite.setScale(SCALE);
     p.sprite.setTintFill(0xff4444);
     this.cameras.main.shake(140, 0.009);
 
@@ -298,6 +335,7 @@ class GameScene extends Phaser.Scene {
       p.sprite.setPosition(this._respawnX, this._respawnY);
       p.sprite.body.setVelocity(0, 0);
       p.jumpsLeft = 2;
+      this._wasOnGround = true;   // prevent phantom land-squash on respawn
 
       this.tweens.add({
         targets: p.sprite, alpha: 0.35,
@@ -389,6 +427,10 @@ class GameScene extends Phaser.Scene {
     if (onGround) p.jumpsLeft = 2;
     if (p.attackCooldown > 0) p.attackCooldown -= delta;
 
+    // ── Squash on landing ─────────────────────────────────────────
+    if (onGround && !this._wasOnGround) this.squashPlayer();
+    this._wasOnGround = onGround;
+
     if (p.isAttacking) { this.applyHorizontalMove(p, k, 0.6); return; }
 
     if ((k.e.isDown || k.comma.isDown) && p.attackCooldown <= 0) {
@@ -404,6 +446,8 @@ class GameScene extends Phaser.Scene {
       bod.setVelocityY(-Math.sqrt(2 * Math.abs(this.physics.world.gravity.y) * TS));
       p.jumpsLeft--;
       s.anims.play('jump', true);
+      // ── Stretch on jump launch ────────────────────────────────
+      this.stretchPlayer();
     }
     this._jumpHeld = jp;
 
