@@ -66,6 +66,7 @@ class PreloadScene extends Phaser.Scene {
     makeImg  ('dirt',          0x3d2008, 32, 32);
     makeImg  ('platform',      0x8b5e3c, 32,  6);
     makeImg  ('spike',         0xddddcc,  8,  8);  // 8×8 fallback
+    makeImg  ('dust',          0xd4c4a8,  4,  4);
   }
 }
 
@@ -191,6 +192,17 @@ class GameScene extends Phaser.Scene {
     this.dummy.sprite.anims.play('dummy_idle', true);
     this.chest.sprite.anims.play('chest_closed', true);
     this.buildHUD();
+
+    // ── Dust particle emitter (jump & land bursts) ────────────────
+    this.dustEmitter = this.add.particles(0, 0, 'dust', {
+      lifespan:  380,
+      speed:     { min: 30, max: 110 },
+      angle:     { min: 160, max: 380 },   // mostly sideways / upward arc
+      scale:     { start: 1.8, end: 0 },
+      alpha:     { start: 0.75, end: 0 },
+      gravityY:  400,
+      emitting:  false,
+    }).setDepth(2);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -303,6 +315,8 @@ class GameScene extends Phaser.Scene {
     this._squashActive = true;
     if (this._ssTween) { this._ssTween.stop(); this._ssTween = null; }
     const s = this.player.sprite;
+    // dust burst at feet on landing
+    this.dustEmitter?.explode(8, s.x, s.body.bottom);
     s.setScale(SCALE);
     this._ssTween = this.tweens.add({
       targets: s,
@@ -319,6 +333,8 @@ class GameScene extends Phaser.Scene {
     this._squashActive = false;              // jump cancels any ongoing squash
     if (this._ssTween) { this._ssTween.stop(); this._ssTween = null; }
     const s = this.player.sprite;
+    // dust burst at feet on jump launch
+    this.dustEmitter?.explode(5, s.x, s.body.bottom);
     s.setScale(SCALE);
     this._ssTween = this.tweens.add({
       targets: s,
