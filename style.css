@@ -5,7 +5,7 @@
 }
 
 body {
-  background: #1a1a2e;
+  background: #eef8ff;   /* match game sky — no dark seam around canvas */
   display: flex;
   justify-content: center;
   align-items: center;

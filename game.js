@@ -5,14 +5,13 @@
 
 const SCALE = 3;            // pixel-art upscale
 const TILE  = 32;           // base tile size
-const TS    = TILE * SCALE; // 96px on screen
+const TS    = TILE * SCALE; // 96px display per tile
 
 // ── PreloadScene ────────────────────────────
 class PreloadScene extends Phaser.Scene {
   constructor() { super('PreloadScene'); }
 
   preload() {
-    // Frame sizes match the cropped assets (transparent padding removed)
     this.load.spritesheet('player_idle',   'assets/idle.png',   { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('player_walk',   'assets/walk.png',   { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('player_jump',   'assets/jump.png',   { frameWidth: 18, frameHeight: 31 });
@@ -21,6 +20,7 @@ class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('dummy',         'assets/dummy.png',  { frameWidth: 27, frameHeight: 25 });
     this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 14, frameHeight: 16 });
     this.load.image('ground',   'assets/ground.png');
+    this.load.image('dirt',     'assets/dirt.png');
     this.load.image('platform', 'assets/platform.png');
   }
 
@@ -71,6 +71,7 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('dummy',         0xcc4444, 2, 27, 25);
     makeSheet('chest',         0xcc9922, 2, 14, 16);
     makeImg  ('ground',        0x4a9944, 32, 32);
+    makeImg  ('dirt',          0x3d2008, 32, 32);
     makeImg  ('platform',      0x8b5e3c, 32,  6);
   }
 }
@@ -82,7 +83,6 @@ class MenuScene extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
 
-    // ── Dadish-style background: bright, airy, clean ─────────────────
     this.add.rectangle(0, 0, width, height, 0xeef8ff).setOrigin(0);
 
     // Clouds
@@ -99,7 +99,7 @@ class MenuScene extends Phaser.Scene {
     this.add.rectangle(0, height - 54, width, 54, 0x6dbf67).setOrigin(0);
     this.add.rectangle(0, height - 54, width,  9, 0x52a84f).setOrigin(0);
 
-    // ── Title ─────────────────────────────────────────────────────────
+    // Title
     this.add.text(width / 2, height / 2 - 90, 'ELEMENTAL WARS', {
       fontSize: '42px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ff5722', stroke: '#ffffff', strokeThickness: 7,
@@ -109,7 +109,7 @@ class MenuScene extends Phaser.Scene {
       fontSize: '20px', fontFamily: 'Arial, sans-serif', color: '#2d6a4f'
     }).setOrigin(0.5);
 
-    // ── Play button ───────────────────────────────────────────────────
+    // Play button
     const btn = this.add.text(width / 2, height / 2 + 28, '  PLAY  ', {
       fontSize: '26px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff', backgroundColor: '#ff5722', padding: { x: 28, y: 13 }
@@ -122,7 +122,6 @@ class MenuScene extends Phaser.Scene {
     this.input.keyboard.once('keydown-ENTER', () => this.scene.start('GameScene'));
     this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
 
-    // ── Controls hint ─────────────────────────────────────────────────
     this.add.text(width / 2, height - 24,
       'Arrow keys / WASD  ·  ↑/W = jump (×2)  ·  ↓/S = duck  ·  E or , = attack', {
       fontSize: '11px', fontFamily: 'monospace', color: '#2d6a4f'
@@ -135,34 +134,37 @@ class GameScene extends Phaser.Scene {
   constructor() { super('GameScene'); }
 
   create() {
-    const WORLD_W = 3600;
-    const WORLD_H = this.scale.height;
-    this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + 200);
+    const WORLD_W  = 3600;
+    const WORLD_H  = 1200;                    // tall world — room for camera to follow jumps
+    const floorY   = WORLD_H - 4 * TS;       // grass-tile centre: 816
+    const groundTop = floorY - TS / 2;       // top surface of grass: 768
 
-    // ── Background (drawn before physics objects, low depth) ─────────
+    this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
+
+    // Sky colour — fills every pixel the camera sees, no seam possible
     this.cameras.main.setBackgroundColor(0xeef8ff);
-    this.addBackground(WORLD_W, WORLD_H);
+    this.addBackground(WORLD_W, WORLD_H, groundTop);
 
-    // ── Level ────────────────────────────────────────────────────────
+    // Level
     this.platforms = this.physics.add.staticGroup();
-    this.buildLevel(WORLD_W, WORLD_H);
+    this.buildLevel(WORLD_W, WORLD_H, floorY);
 
-    // ── Entities ─────────────────────────────────────────────────────
-    this.player = this.createPlayer(120, WORLD_H - TS - 80);
-    this.dummy  = this.createDummy(1800, WORLD_H - TS - 60);
-    this.chest  = this.createChest(3000, WORLD_H - TS - 60);
+    // Entities
+    this.player = this.createPlayer(120,  groundTop - 120);
+    this.dummy  = this.createDummy(1800,  groundTop - 25 * SCALE / 2);
+    this.chest  = this.createChest(3000,  groundTop - 16 * SCALE / 2);
 
-    // ── Colliders ────────────────────────────────────────────────────
+    // Colliders
     this.physics.add.collider(this.player.sprite, this.platforms);
     this.physics.add.collider(this.dummy.sprite,  this.platforms);
     this.physics.add.collider(this.chest.sprite,  this.platforms);
 
-    // ── Camera — zoomed out for that Dadish feel ──────────────────────
+    // Camera — zoomed-out Dadish feel, follows player in both axes
     this.cameras.main.setZoom(0.65);
-    this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
-    this.cameras.main.startFollow(this.player.sprite, true, 0.12, 0.12);
+    this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);   // full world, vertical included
+    this.cameras.main.startFollow(this.player.sprite, true, 0.12, 0.10);
 
-    // ── Input ────────────────────────────────────────────────────────
+    // Input
     this.keys = this.input.keyboard.addKeys({
       left:  Phaser.Input.Keyboard.KeyCodes.LEFT,
       right: Phaser.Input.Keyboard.KeyCodes.RIGHT,
@@ -177,7 +179,6 @@ class GameScene extends Phaser.Scene {
     });
     this._jumpHeld = false;
 
-    // ── Animations & HUD ─────────────────────────────────────────────
     this.buildAnims();
     this.player.sprite.anims.play('idle', true);
     this.dummy.sprite.anims.play('dummy_idle', true);
@@ -186,61 +187,63 @@ class GameScene extends Phaser.Scene {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  //  Parallax background — clouds, hills, sky bands
+  //  Background — camera colour handles sky, Graphics adds clouds
   // ─────────────────────────────────────────────────────────────────
-  addBackground(worldW, worldH) {
-    // Far sky wash (very slow parallax)
-    this.add.rectangle(0, 0, worldW, worldH, 0xdcf2ff)
-      .setOrigin(0).setScrollFactor(0.03).setDepth(-10);
-
-    // Distant hills
-    const hills = this.add.graphics().setScrollFactor(0.08).setDepth(-9);
-    hills.fillStyle(0xa8d8a8);
-    for (let i = 0; i < 12; i++) {
-      const hx = i * 380 + 180;
-      const hw = 340 + (i % 3) * 70;
-      const hh = 110 + (i % 4) * 22;
-      hills.fillEllipse(hx, worldH - 44, hw, hh);
-    }
-
-    // White clouds (mid parallax)
-    const clouds = this.add.graphics().setScrollFactor(0.18).setDepth(-8);
+  addBackground(worldW, worldH, groundTop) {
+    // Clouds drift slowly left-right (parallax X=0.15, Y=0.15 so they also
+    // drift very gently up/down as camera follows jumps — looks natural)
+    const clouds = this.add.graphics().setScrollFactor(0.15).setDepth(-8);
     clouds.fillStyle(0xffffff, 0.92);
+
+    // Positioned at world Y ≈ 200–450 so they sit in the sky band
+    // that is visible whether the player is standing or jumping
     [
-      [230, 65, 140, 48], [600, 48, 108, 38], [960, 82, 165, 54],
-      [1340, 58, 125, 44], [1720, 88, 150, 52], [2100, 55, 115, 40],
-      [2470, 76, 158, 50], [2850, 68, 128, 45], [3200, 84, 145, 50],
+      [230,  230, 140, 48], [600,  195, 108, 38], [960,  260, 165, 54],
+      [1340, 215, 125, 44], [1720, 285, 150, 52], [2100, 205, 115, 40],
+      [2470, 250, 158, 50], [2850, 225, 128, 45], [3200, 270, 145, 50],
     ].forEach(([cx, cy, cw, ch]) => {
-      clouds.fillEllipse(cx,              cy,           cw,        ch);
+      clouds.fillEllipse(cx,             cy,           cw,       ch);
       clouds.fillEllipse(cx - cw * 0.22, cy - ch * 0.28, cw * 0.55, ch * 0.65);
       clouds.fillEllipse(cx + cw * 0.18, cy - ch * 0.22, cw * 0.50, ch * 0.60);
     });
   }
 
   // ─────────────────────────────────────────────────────────────────
-  //  Level layout
+  //  Level — grass on top, solid dirt filling down to the world floor
   // ─────────────────────────────────────────────────────────────────
-  buildLevel(worldW, worldH) {
-    const ground = (x, y, cols) => {
+  buildLevel(worldW, worldH, floorY) {
+    const grass = (startX, cols) => {
       for (let i = 0; i < cols; i++) {
-        const t = this.platforms.create(x + i * TS, y, 'ground');
-        t.setScale(SCALE).refreshBody();
+        this.platforms.create(startX + i * TS, floorY, 'ground')
+          .setScale(SCALE).refreshBody();
       }
     };
-    const plat = (x, y) => {
-      const t = this.platforms.create(x, y, 'platform');
-      t.setScale(SCALE).refreshBody();
+
+    const dirt = (startX, y, cols) => {
+      for (let i = 0; i < cols; i++) {
+        this.platforms.create(startX + i * TS, y, 'dirt')
+          .setScale(SCALE).refreshBody();
+      }
     };
 
-    const floorY = worldH - TS / 2;
+    const plat = (x, y) => {
+      this.platforms.create(x, y, 'platform').setScale(SCALE).refreshBody();
+    };
 
-    // Floor: mostly continuous, one small 1-tile gap to hop
-    ground(0,        floorY, 16);   // 0–1536
-    ground(17 * TS,  floorY, 22);   // 1632–3744
+    // ── Grass surface (two sections, small gap at tile 16) ──
+    grass(0,       16);   // tiles 0-15
+    grass(17 * TS, 22);   // tiles 17-38
 
-    // Floating platforms — all reachable with 1–2 jumps from the floor
-    plat(6  * TS, floorY - 1 * TS);   // ~96px above floor  (single jump)
-    plat(12 * TS, floorY - 2 * TS);   // ~192px above floor (double jump)
+    // ── Dirt fill: 4 rows below the grass, full width including the gap ──
+    // This makes the ground look solid and reach the bottom of the world
+    const totalCols = Math.ceil(worldW / TS) + 1;
+    for (let row = 1; row <= 4; row++) {
+      dirt(0, floorY + row * TS, totalCols);
+    }
+
+    // ── Floating platforms — single tile, reachable with 1–2 jumps ──
+    plat(6  * TS, floorY - 1 * TS);
+    plat(12 * TS, floorY - 2 * TS);
     plat(19 * TS, floorY - 1 * TS);
     plat(26 * TS, floorY - 2 * TS);
     plat(33 * TS, floorY - 1 * TS);
@@ -256,7 +259,6 @@ class GameScene extends Phaser.Scene {
       .setFlipX(true);  // start facing right
 
     sprite.body.setSize(14, 27).setOffset(2, 2);
-
     return { sprite, jumpsLeft: 2, isAttacking: false, attackCooldown: 0 };
   }
 
@@ -308,7 +310,6 @@ class GameScene extends Phaser.Scene {
   //  HUD
   // ─────────────────────────────────────────────────────────────────
   buildHUD() {
-    // Dummy HP bar — world-space, repositioned every frame
     const barBg    = this.add.rectangle(0, 0, 80, 10, 0x220000).setOrigin(0.5, 1);
     const barFg    = this.add.rectangle(0, 0, 80, 10, 0xff3333).setOrigin(0,   1);
     const barLabel = this.add.text(0, 0, '', {
@@ -316,7 +317,7 @@ class GameScene extends Phaser.Scene {
     }).setOrigin(0.5, 1);
     this.dummyBar = { bg: barBg, fg: barFg, label: barLabel };
 
-    // Controls strip — fixed to camera (setScrollFactor(0) is unaffected by zoom)
+    // Controls strip — fixed to screen (scrollFactor 0 = unaffected by camera zoom/scroll)
     const { width, height } = this.scale;
     this.add.text(width / 2, 18,
       'Arrow/WASD = move   ↑/W = jump (×2)   ↓/S = duck   E or , = attack', {
@@ -325,7 +326,6 @@ class GameScene extends Phaser.Scene {
       padding: { x: 10, y: 5 }
     }).setOrigin(0.5, 0).setScrollFactor(0);
 
-    // Victory banner
     this.victoryText = this.add.text(width / 2, height / 2, '  Level Complete!  ', {
       fontSize: '36px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ff5722', stroke: '#ffffff', strokeThickness: 6,
@@ -369,7 +369,7 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Jump
+    // Jump — allows mid-air second jump (double jump)
     const jumpPressed = k.up.isDown || k.w.isDown;
     if (jumpPressed && !this._jumpHeld && p.jumpsLeft > 0) {
       bod.setVelocityY(-Math.sqrt(2 * Math.abs(this.physics.world.gravity.y) * TS));
