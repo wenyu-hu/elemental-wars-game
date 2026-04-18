@@ -3,8 +3,8 @@
 //  Phaser 3.60  |  32×32 sprite world
 // ─────────────────────────────────────────────
 
-const SCALE = 3;           // pixel-art upscale
-const TILE  = 32;          // base tile size
+const SCALE = 3;            // pixel-art upscale
+const TILE  = 32;           // base tile size
 const TS    = TILE * SCALE; // 96px on screen
 
 // ── PreloadScene ────────────────────────────
@@ -25,48 +25,35 @@ class PreloadScene extends Phaser.Scene {
   }
 
   create() {
-    // Generate placeholder textures for anything not yet loaded
     this.buildFallbacks();
     this.scene.start('MenuScene');
   }
 
-  // ── Canvas-based fallbacks with proper spritesheet frame data ──────
   buildFallbacks() {
-    // Uses native canvas so frame data is correct and Phaser can animate
     const makeSheet = (key, hexColor, numFrames, fw = 32, fh = 32) => {
-      if (this.textures.exists(key)) return; // real asset already loaded
-
+      if (this.textures.exists(key)) return;
       const canvas  = document.createElement('canvas');
       canvas.width  = fw * numFrames;
       canvas.height = fh;
       const ctx = canvas.getContext('2d');
-
       const r = (hexColor >> 16) & 0xff;
       const g = (hexColor >>  8) & 0xff;
       const b =  hexColor        & 0xff;
-
       for (let i = 0; i < numFrames; i++) {
         ctx.fillStyle = `rgb(${r},${g},${b})`;
         ctx.fillRect(i * fw, 0, fw, fh);
-        // thin border so individual frames are visible
         ctx.strokeStyle = 'rgba(0,0,0,0.35)';
         ctx.lineWidth   = 1;
         ctx.strokeRect(i * fw + 0.5, 0.5, fw - 1, fh - 1);
       }
-
       const tex = this.textures.addCanvas(key, canvas);
-      // Add numbered frame entries so generateFrameNumbers() works
-      for (let i = 0; i < numFrames; i++) {
-        tex.add(i, 0, i * fw, 0, fw, fh);
-      }
+      for (let i = 0; i < numFrames; i++) tex.add(i, 0, i * fw, 0, fw, fh);
     };
 
     const makeImg = (key, hexColor, w = 32, h = 32) => {
       if (this.textures.exists(key)) return;
-
       const canvas  = document.createElement('canvas');
-      canvas.width  = w;
-      canvas.height = h;
+      canvas.width  = w; canvas.height = h;
       const ctx = canvas.getContext('2d');
       const r = (hexColor >> 16) & 0xff;
       const g = (hexColor >>  8) & 0xff;
@@ -83,8 +70,8 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('player_duck',   0x2266cc, 1, 18, 31);
     makeSheet('dummy',         0xcc4444, 2, 27, 25);
     makeSheet('chest',         0xcc9922, 2, 14, 16);
-    makeImg  ('ground',        0x228822, 32, 32);
-    makeImg  ('platform',      0x886633, 32,  6);
+    makeImg  ('ground',        0x4a9944, 32, 32);
+    makeImg  ('platform',      0x8b5e3c, 32,  6);
   }
 }
 
@@ -95,38 +82,50 @@ class MenuScene extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
 
-    this.add.rectangle(0, 0, width, height, 0x1a1a2e).setOrigin(0);
+    // ── Dadish-style background: bright, airy, clean ─────────────────
+    this.add.rectangle(0, 0, width, height, 0xeef8ff).setOrigin(0);
 
-    this.add.text(width / 2, height / 2 - 60, 'ELEMENTAL WARS', {
-      fontSize: '36px', fontFamily: 'monospace', color: '#ffcc44',
-      stroke: '#000', strokeThickness: 4
+    // Clouds
+    const cg = this.add.graphics();
+    cg.fillStyle(0xffffff, 0.9);
+    [[90, 75, 130, 44], [280, 52, 100, 36], [500, 85, 150, 48],
+     [680, 58, 110, 38], [760, 110, 90, 32]].forEach(([x, y, w, h]) => {
+      cg.fillEllipse(x, y, w, h);
+      cg.fillEllipse(x - w * 0.22, y - h * 0.28, w * 0.55, h * 0.65);
+      cg.fillEllipse(x + w * 0.18, y - h * 0.22, w * 0.50, h * 0.60);
+    });
+
+    // Ground strip
+    this.add.rectangle(0, height - 54, width, 54, 0x6dbf67).setOrigin(0);
+    this.add.rectangle(0, height - 54, width,  9, 0x52a84f).setOrigin(0);
+
+    // ── Title ─────────────────────────────────────────────────────────
+    this.add.text(width / 2, height / 2 - 90, 'ELEMENTAL WARS', {
+      fontSize: '42px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ff5722', stroke: '#ffffff', strokeThickness: 7,
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, height / 2, 'Tutorial Level', {
-      fontSize: '18px', fontFamily: 'monospace', color: '#aaccff'
+    this.add.text(width / 2, height / 2 - 38, 'Tutorial Level', {
+      fontSize: '20px', fontFamily: 'Arial, sans-serif', color: '#2d6a4f'
     }).setOrigin(0.5);
 
-    const startBtn = this.add.text(width / 2, height / 2 + 60, '▶  PLAY', {
-      fontSize: '22px', fontFamily: 'monospace', color: '#ffffff',
-      backgroundColor: '#334466', padding: { x: 20, y: 10 }
+    // ── Play button ───────────────────────────────────────────────────
+    const btn = this.add.text(width / 2, height / 2 + 28, '  PLAY  ', {
+      fontSize: '26px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', backgroundColor: '#ff5722', padding: { x: 28, y: 13 }
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
 
-    startBtn.on('pointerover', () => startBtn.setStyle({ color: '#ffcc44' }));
-    startBtn.on('pointerout',  () => startBtn.setStyle({ color: '#ffffff' }));
-    // pointerup is more reliable than pointerdown for text buttons in Phaser
-    startBtn.on('pointerup',   () => this.scene.start('GameScene'));
+    btn.on('pointerover', () => btn.setStyle({ backgroundColor: '#e64a19' }));
+    btn.on('pointerout',  () => btn.setStyle({ backgroundColor: '#ff5722' }));
+    btn.on('pointerup',   () => this.scene.start('GameScene'));
 
-    // Also allow Enter / Space to start
-    const keys = this.input.keyboard.addKeys({
-      enter: Phaser.Input.Keyboard.KeyCodes.ENTER,
-      space: Phaser.Input.Keyboard.KeyCodes.SPACE,
-    });
     this.input.keyboard.once('keydown-ENTER', () => this.scene.start('GameScene'));
     this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
 
-    this.add.text(width / 2, height - 30,
-      'Arrow keys / WASD · ↑/W = jump · ↓/S = duck · E or , = attack', {
-      fontSize: '11px', fontFamily: 'monospace', color: '#667799'
+    // ── Controls hint ─────────────────────────────────────────────────
+    this.add.text(width / 2, height - 24,
+      'Arrow keys / WASD  ·  ↑/W = jump (×2)  ·  ↓/S = duck  ·  E or , = attack', {
+      fontSize: '11px', fontFamily: 'monospace', color: '#2d6a4f'
     }).setOrigin(0.5);
   }
 }
@@ -136,35 +135,32 @@ class GameScene extends Phaser.Scene {
   constructor() { super('GameScene'); }
 
   create() {
-    // ── World bounds ─────────────────────────────────────────────────
-    const WORLD_W = 5000;
+    const WORLD_W = 3600;
     const WORLD_H = this.scale.height;
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + 200);
 
-    // ── Sky (camera background — avoids large rectangle objects) ─────
-    this.cameras.main.setBackgroundColor(0x87ceeb);
+    // ── Background (drawn before physics objects, low depth) ─────────
+    this.cameras.main.setBackgroundColor(0xeef8ff);
+    this.addBackground(WORLD_W, WORLD_H);
 
-    // ── Build level ──────────────────────────────────────────────────
+    // ── Level ────────────────────────────────────────────────────────
     this.platforms = this.physics.add.staticGroup();
     this.buildLevel(WORLD_W, WORLD_H);
 
-    // ── Player ──────────────────────────────────────────────────────
-    this.player = this.createPlayer(120, WORLD_H - TS - 64);
+    // ── Entities ─────────────────────────────────────────────────────
+    this.player = this.createPlayer(120, WORLD_H - TS - 80);
+    this.dummy  = this.createDummy(1800, WORLD_H - TS - 60);
+    this.chest  = this.createChest(3000, WORLD_H - TS - 60);
 
-    // ── Training Dummy ───────────────────────────────────────────────
-    this.dummy = this.createDummy(2800, WORLD_H - TS - 64);
-
-    // ── Chest ────────────────────────────────────────────────────────
-    this.chest = this.createChest(4600, WORLD_H - TS - 64);
-
-    // ── Physics colliders ────────────────────────────────────────────
+    // ── Colliders ────────────────────────────────────────────────────
     this.physics.add.collider(this.player.sprite, this.platforms);
     this.physics.add.collider(this.dummy.sprite,  this.platforms);
     this.physics.add.collider(this.chest.sprite,  this.platforms);
 
-    // ── Camera ───────────────────────────────────────────────────────
+    // ── Camera — zoomed out for that Dadish feel ──────────────────────
+    this.cameras.main.setZoom(0.65);
     this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
-    this.cameras.main.startFollow(this.player.sprite, true, 0.1, 0.1);
+    this.cameras.main.startFollow(this.player.sprite, true, 0.12, 0.12);
 
     // ── Input ────────────────────────────────────────────────────────
     this.keys = this.input.keyboard.addKeys({
@@ -179,19 +175,46 @@ class GameScene extends Phaser.Scene {
       e:     Phaser.Input.Keyboard.KeyCodes.E,
       comma: Phaser.Input.Keyboard.KeyCodes.COMMA,
     });
-
     this._jumpHeld = false;
 
-    // ── Animations ───────────────────────────────────────────────────
+    // ── Animations & HUD ─────────────────────────────────────────────
     this.buildAnims();
-
-    // Start default animations
     this.player.sprite.anims.play('idle', true);
     this.dummy.sprite.anims.play('dummy_idle', true);
     this.chest.sprite.anims.play('chest_closed', true);
-
-    // ── HUD ──────────────────────────────────────────────────────────
     this.buildHUD();
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  //  Parallax background — clouds, hills, sky bands
+  // ─────────────────────────────────────────────────────────────────
+  addBackground(worldW, worldH) {
+    // Far sky wash (very slow parallax)
+    this.add.rectangle(0, 0, worldW, worldH, 0xdcf2ff)
+      .setOrigin(0).setScrollFactor(0.03).setDepth(-10);
+
+    // Distant hills
+    const hills = this.add.graphics().setScrollFactor(0.08).setDepth(-9);
+    hills.fillStyle(0xa8d8a8);
+    for (let i = 0; i < 12; i++) {
+      const hx = i * 380 + 180;
+      const hw = 340 + (i % 3) * 70;
+      const hh = 110 + (i % 4) * 22;
+      hills.fillEllipse(hx, worldH - 44, hw, hh);
+    }
+
+    // White clouds (mid parallax)
+    const clouds = this.add.graphics().setScrollFactor(0.18).setDepth(-8);
+    clouds.fillStyle(0xffffff, 0.92);
+    [
+      [230, 65, 140, 48], [600, 48, 108, 38], [960, 82, 165, 54],
+      [1340, 58, 125, 44], [1720, 88, 150, 52], [2100, 55, 115, 40],
+      [2470, 76, 158, 50], [2850, 68, 128, 45], [3200, 84, 145, 50],
+    ].forEach(([cx, cy, cw, ch]) => {
+      clouds.fillEllipse(cx,              cy,           cw,        ch);
+      clouds.fillEllipse(cx - cw * 0.22, cy - ch * 0.28, cw * 0.55, ch * 0.65);
+      clouds.fillEllipse(cx + cw * 0.18, cy - ch * 0.22, cw * 0.50, ch * 0.60);
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -204,26 +227,23 @@ class GameScene extends Phaser.Scene {
         t.setScale(SCALE).refreshBody();
       }
     };
-    const plat = (x, y, cols) => {
-      for (let i = 0; i < cols; i++) {
-        const t = this.platforms.create(x + i * TS, y, 'platform');
-        t.setScale(SCALE).refreshBody();
-      }
+    const plat = (x, y) => {
+      const t = this.platforms.create(x, y, 'platform');
+      t.setScale(SCALE).refreshBody();
     };
 
     const floorY = worldH - TS / 2;
 
-    // Mostly-continuous floor with one small gap (1 tile wide) to hop
-    ground(0,        floorY, 16);   // 0 → 1536
-    ground(17 * TS,  floorY, 38);   // 1632 → 5280  (covers dummy at 2800, chest at 4600)
+    // Floor: mostly continuous, one small 1-tile gap to hop
+    ground(0,        floorY, 16);   // 0–1536
+    ground(17 * TS,  floorY, 22);   // 1632–3744
 
-    // Floating platforms — each is 1 tile, all reachable with 1 or 2 jumps
-    plat(8  * TS, floorY - 1 * TS, 1);   // single-jump height (~96px above floor)
-    plat(14 * TS, floorY - 2 * TS, 1);   // double-jump height (~192px)
-    plat(21 * TS, floorY - 1 * TS, 1);
-    plat(28 * TS, floorY - 2 * TS, 1);
-    plat(36 * TS, floorY - 1 * TS, 1);
-    plat(43 * TS, floorY - 2 * TS, 1);
+    // Floating platforms — all reachable with 1–2 jumps from the floor
+    plat(6  * TS, floorY - 1 * TS);   // ~96px above floor  (single jump)
+    plat(12 * TS, floorY - 2 * TS);   // ~192px above floor (double jump)
+    plat(19 * TS, floorY - 1 * TS);
+    plat(26 * TS, floorY - 2 * TS);
+    plat(33 * TS, floorY - 1 * TS);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -232,19 +252,12 @@ class GameScene extends Phaser.Scene {
   createPlayer(x, y) {
     const sprite = this.physics.add.sprite(x, y, 'player_idle')
       .setScale(SCALE)
-      .setCollideWorldBounds(true);
+      .setCollideWorldBounds(true)
+      .setFlipX(true);  // start facing right
 
-    // Body in texture-space units (Phaser multiplies by SCALE automatically)
-    // Texture is 18×31 after crop; body covers the main character silhouette
     sprite.body.setSize(14, 27).setOffset(2, 2);
 
-    return {
-      sprite,
-      jumpsLeft:      2,
-      isAttacking:    false,
-      isDucking:      false,
-      attackCooldown: 0,
-    };
+    return { sprite, jumpsLeft: 2, isAttacking: false, attackCooldown: 0 };
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -252,13 +265,9 @@ class GameScene extends Phaser.Scene {
   // ─────────────────────────────────────────────────────────────────
   createDummy(x, y) {
     const sprite = this.physics.add.sprite(x, y, 'dummy')
-      .setScale(SCALE)
-      .setImmovable(true);
-
+      .setScale(SCALE).setImmovable(true);
     sprite.body.setAllowGravity(false);
-    // Texture 27×25 after crop
     sprite.body.setSize(23, 23).setOffset(2, 1);
-
     const maxHp = 5;
     return { sprite, hp: maxHp, maxHp, dead: false };
   }
@@ -268,11 +277,8 @@ class GameScene extends Phaser.Scene {
   // ─────────────────────────────────────────────────────────────────
   createChest(x, y) {
     const sprite = this.physics.add.sprite(x, y, 'chest')
-      .setScale(SCALE)
-      .setImmovable(true);
-
+      .setScale(SCALE).setImmovable(true);
     sprite.body.setAllowGravity(false);
-    // Texture 14×16 after crop
     sprite.body.setSize(12, 14).setOffset(1, 1);
     return { sprite, opened: false };
   }
@@ -283,13 +289,10 @@ class GameScene extends Phaser.Scene {
   buildAnims() {
     const add = (key, sheet, start, end, fps, repeat = -1) => {
       if (!this.anims.exists(key)) {
-        this.anims.create({
-          key, frameRate: fps, repeat,
-          frames: this.anims.generateFrameNumbers(sheet, { start, end })
-        });
+        this.anims.create({ key, frameRate: fps, repeat,
+          frames: this.anims.generateFrameNumbers(sheet, { start, end }) });
       }
     };
-
     add('idle',         'player_idle',   0, 0,  4);
     add('walk',         'player_walk',   0, 3,  8);
     add('jump',         'player_jump',   0, 2,  6, 0);
@@ -305,34 +308,33 @@ class GameScene extends Phaser.Scene {
   //  HUD
   // ─────────────────────────────────────────────────────────────────
   buildHUD() {
-    // HP bar — positioned in world space above the dummy each frame
-    const barBg    = this.add.rectangle(0, 0, 80, 10, 0x330000).setOrigin(0.5, 1);
-    const barFg    = this.add.rectangle(0, 0, 80, 10, 0xff2222).setOrigin(0,   1);
+    // Dummy HP bar — world-space, repositioned every frame
+    const barBg    = this.add.rectangle(0, 0, 80, 10, 0x220000).setOrigin(0.5, 1);
+    const barFg    = this.add.rectangle(0, 0, 80, 10, 0xff3333).setOrigin(0,   1);
     const barLabel = this.add.text(0, 0, '', {
-      fontSize: '9px', fontFamily: 'monospace', color: '#ffcccc'
+      fontSize: '9px', fontFamily: 'monospace', color: '#ffbbbb'
     }).setOrigin(0.5, 1);
-
     this.dummyBar = { bg: barBg, fg: barFg, label: barLabel };
 
-    // Camera-fixed hint strip
+    // Controls strip — fixed to camera (setScrollFactor(0) is unaffected by zoom)
     const { width, height } = this.scale;
-    this.add.text(width / 2, 16,
-      'Arrow/WASD = move   ↑/W = jump (x2)   ↓/S = duck   E or , = attack', {
-      fontSize: '10px', fontFamily: 'monospace',
-      color: '#ffffff', backgroundColor: '#00000099',
-      padding: { x: 8, y: 4 }
+    this.add.text(width / 2, 18,
+      'Arrow/WASD = move   ↑/W = jump (×2)   ↓/S = duck   E or , = attack', {
+      fontSize: '11px', fontFamily: 'monospace',
+      color: '#1a3a5c', backgroundColor: '#ffffffcc',
+      padding: { x: 10, y: 5 }
     }).setOrigin(0.5, 0).setScrollFactor(0);
 
-    // Victory banner (hidden until chest opened)
+    // Victory banner
     this.victoryText = this.add.text(width / 2, height / 2, '  Level Complete!  ', {
-      fontSize: '32px', fontFamily: 'monospace',
-      color: '#ffcc44', stroke: '#000', strokeThickness: 6,
-      backgroundColor: '#00000099', padding: { x: 20, y: 12 }
+      fontSize: '36px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ff5722', stroke: '#ffffff', strokeThickness: 6,
+      backgroundColor: '#ffffffcc', padding: { x: 24, y: 14 }
     }).setOrigin(0.5).setScrollFactor(0).setVisible(false).setDepth(10);
   }
 
   // ─────────────────────────────────────────────────────────────────
-  //  Main update loop
+  //  Update
   // ─────────────────────────────────────────────────────────────────
   update(time, delta) {
     this.updatePlayer(delta);
@@ -350,47 +352,41 @@ class GameScene extends Phaser.Scene {
 
     const onGround = bod.blocked.down;
     if (onGround) p.jumpsLeft = 2;
-
     if (p.attackCooldown > 0) p.attackCooldown -= delta;
 
-    // ── Attacking — let the anim finish, allow light movement ───────
     if (p.isAttacking) {
       this.applyHorizontalMove(p, k, 0.6);
       return;
     }
 
-    // ── Attack trigger ───────────────────────────────────────────────
+    // Attack
     if ((k.e.isDown || k.comma.isDown) && p.attackCooldown <= 0) {
       p.isAttacking    = true;
       p.attackCooldown = 600;
       s.anims.play('attack', true);
       s.once('animationcomplete-attack', () => { p.isAttacking = false; });
-      // Hit detection fires mid-swing
       this.time.delayedCall(200, () => this.checkAttackHit());
       return;
     }
 
-    // ── Jump (each apex ≈ one player height) ────────────────────────
+    // Jump
     const jumpPressed = k.up.isDown || k.w.isDown;
     if (jumpPressed && !this._jumpHeld && p.jumpsLeft > 0) {
-      const jumpVel = -Math.sqrt(2 * Math.abs(this.physics.world.gravity.y) * TS);
-      bod.setVelocityY(jumpVel);
+      bod.setVelocityY(-Math.sqrt(2 * Math.abs(this.physics.world.gravity.y) * TS));
       p.jumpsLeft--;
       s.anims.play('jump', true);
     }
     this._jumpHeld = jumpPressed;
 
-    // ── Duck ────────────────────────────────────────────────────────
+    // Duck
     if ((k.down.isDown || k.s.isDown) && onGround) {
       s.anims.play('duck', true);
       bod.setVelocityX(0);
       return;
     }
 
-    // ── Horizontal movement ─────────────────────────────────────────
     this.applyHorizontalMove(p, k, 1);
 
-    // ── Animation ───────────────────────────────────────────────────
     if (!onGround) {
       if (s.anims.currentAnim?.key !== 'jump') s.anims.play('jump', true);
     } else if (Math.abs(bod.velocity.x) > 10) {
@@ -419,19 +415,16 @@ class GameScene extends Phaser.Scene {
   // ─────────────────────────────────────────────────────────────────
   checkAttackHit() {
     const ps    = this.player.sprite;
-    const reach = TS * 1.2;
+    const reach = TS * 1.3;
 
-    // ── Dummy ────────────────────────────────────────────────────────
     if (this.dummy && !this.dummy.dead) {
       const ds     = this.dummy.sprite;
       const dx     = Math.abs(ps.x - ds.x);
       const dy     = Math.abs(ps.y - ds.y);
-      // flipX=true → facing right → target must be to the right
       const facing = ps.flipX ? (ds.x > ps.x) : (ds.x < ps.x);
       if (dx < reach && dy < TS && facing) this.hitDummy();
     }
 
-    // ── Chest ─────────────────────────────────────────────────────────
     if (this.chest && !this.chest.opened) {
       const cs     = this.chest.sprite;
       const dx     = Math.abs(ps.x - cs.x);
@@ -442,24 +435,19 @@ class GameScene extends Phaser.Scene {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  //  Dummy logic
+  //  Dummy
   // ─────────────────────────────────────────────────────────────────
   hitDummy() {
     const d = this.dummy;
     d.hp = Math.max(0, d.hp - 1);
 
     if (d.hp <= 0) {
-      // ── Killing blow — topple, no flash ───────────────────────────
       d.dead = true;
       d.sprite.anims.play('dummy_hit', true);
       this.time.delayedCall(150, () => {
         d.sprite.setTint(0x550000);
         this.tweens.add({
-          targets:  d.sprite,
-          angle:    90,
-          alpha:    0,
-          duration: 400,
-          ease:     'Power2',
+          targets: d.sprite, angle: 90, alpha: 0, duration: 400, ease: 'Power2',
           onComplete: () => d.sprite.destroy()
         });
         this.dummyBar.bg.setVisible(false);
@@ -467,10 +455,7 @@ class GameScene extends Phaser.Scene {
         this.dummyBar.label.setVisible(false);
       });
     } else {
-      // ── Non-lethal hit — white flash, then back to idle ───────────
       d.sprite.anims.play('dummy_hit', true);
-
-      // setTintFill makes it solid white (visible flash)
       d.sprite.setTintFill(0xffffff);
       this.time.delayedCall(100, () => {
         if (!d.dead) {
@@ -481,25 +466,18 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  //  Dummy HP bar (world-space, above the dummy)
-  // ─────────────────────────────────────────────────────────────────
   updateDummyBar() {
     if (this.dummy.dead) return;
-
-    const ds   = this.dummy.sprite;
-    const bar  = this.dummyBar;
+    const ds  = this.dummy.sprite;
+    const bar = this.dummyBar;
     const barW = 80;
-    const bx   = ds.x;
-    const by   = ds.y - 25 * SCALE / 2 - 8;  // 25 = dummy texture height
+    const bx  = ds.x;
+    const by  = ds.y - 25 * SCALE / 2 - 8;
 
     bar.bg.setPosition(bx, by).setSize(barW, 10);
-
     const pct = this.dummy.hp / this.dummy.maxHp;
     bar.fg.setPosition(bx - barW / 2, by).setSize(barW * pct, 10);
-
-    bar.label.setPosition(bx, by - 10)
-             .setText(`HP: ${this.dummy.hp} / ${this.dummy.maxHp}`);
+    bar.label.setPosition(bx, by - 10).setText(`HP: ${this.dummy.hp} / ${this.dummy.maxHp}`);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -510,16 +488,10 @@ class GameScene extends Phaser.Scene {
     if (c.opened) return;
     c.opened = true;
     c.sprite.anims.play('chest_open', true);
-
     this.tweens.add({
-      targets:  c.sprite,
-      scaleX:   SCALE * 1.15,
-      scaleY:   SCALE * 1.15,
-      duration: 120,
-      yoyo:     true,
-      repeat:   2
+      targets: c.sprite, scaleX: SCALE * 1.2, scaleY: SCALE * 1.2,
+      duration: 120, yoyo: true, repeat: 2
     });
-
     this.time.delayedCall(400, () => {
       this.victoryText.setVisible(true);
       this.time.delayedCall(2500, () => this.scene.start('MenuScene'));
