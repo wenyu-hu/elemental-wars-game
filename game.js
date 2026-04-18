@@ -65,7 +65,7 @@ class PreloadScene extends Phaser.Scene {
     makeImg  ('ground',        0x4a9944, 32, 32);
     makeImg  ('dirt',          0x3d2008, 32, 32);
     makeImg  ('platform',      0x8b5e3c, 32,  6);
-    makeImg  ('spike',         0xddddcc, 16, 16);
+    makeImg  ('spike',         0xddddcc,  8,  8);  // 8×8 fallback
   }
 }
 
@@ -121,26 +121,20 @@ class GameScene extends Phaser.Scene {
   constructor() { super('GameScene'); }
 
   create() {
-    const WORLD_W  = 3600;
-    const WORLD_H  = 1200;
-    const floorY   = WORLD_H - 4 * TS;         // grass tile centre  y = 816
-    const groundTop = floorY - TS / 2;          // grass surface      y = 768
-    const pitFloor  = floorY + TS / 2;          // dirt row-1 top     y = 864
+    const WORLD_W   = 3600;
+    const WORLD_H   = 1200;
+    const floorY    = WORLD_H - 4 * TS;       // grass tile centre  y = 816
+    const groundTop = floorY - TS / 2;         // grass surface      y = 768
 
-    // Spike sits on pit floor — tip pokes up through the gap
-    const spikeDisplayH = 16 * SCALE;           // 48 px display
-    this._spikeY = pitFloor - spikeDisplayH / 2; // sprite centre y = 840
-
-    // Respawn anchor
-    this._respawnX = 120;
-    this._respawnY = groundTop - 120;
-    this._spikeHit = false;
+    this._respawnX  = 120;
+    this._respawnY  = groundTop - 120;
+    this._spikeHit  = false;
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
     this.cameras.main.setBackgroundColor(0xeef8ff);
     this.addBackground(WORLD_W, WORLD_H);
 
-    // ── Level, entities ──────────────────────────────────────────────
+    // Level + entities
     this.platforms = this.physics.add.staticGroup();
     this.buildLevel(WORLD_W, WORLD_H, floorY);
 
@@ -149,28 +143,27 @@ class GameScene extends Phaser.Scene {
     this.chest  = this.createChest(3000, groundTop - 16 * SCALE / 2);
 
     this.spikes = this.physics.add.staticGroup();
-    this.buildSpikes();
+    this.buildSpikes(floorY);
 
-    // ── Colliders ────────────────────────────────────────────────────
+    // Colliders
     this.physics.add.collider(this.player.sprite, this.platforms);
     this.physics.add.collider(this.dummy.sprite,  this.platforms);
     this.physics.add.collider(this.chest.sprite,  this.platforms);
-
-    // Spike overlap → respawn
     this.physics.add.overlap(
       this.player.sprite, this.spikes,
       () => this.respawnPlayer(), null, this
     );
 
     // ── Camera ───────────────────────────────────────────────────────
-    // followOffset(0, -174) shifts focus 174 world-units above the player,
-    // so the player sits at ~75% from top and ground takes up ~20% of screen.
+    // followOffset(0, +181): Phaser subtracts the offset from the target,
+    // so +181 lifts the camera focus 181 world-units ABOVE the player,
+    // giving ~75% sky / 20% ground on screen (Dadish look).
     this.cameras.main.setZoom(0.65);
     this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
     this.cameras.main.startFollow(this.player.sprite, true, 0.12, 0.10);
-    this.cameras.main.setFollowOffset(0, -174);
+    this.cameras.main.setFollowOffset(0, 181);
 
-    // ── Input ────────────────────────────────────────────────────────
+    // Input
     this.keys = this.input.keyboard.addKeys({
       left:  Phaser.Input.Keyboard.KeyCodes.LEFT,
       right: Phaser.Input.Keyboard.KeyCodes.RIGHT,
@@ -193,12 +186,11 @@ class GameScene extends Phaser.Scene {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  //  Background — camera colour handles sky; Graphics adds clouds
+  //  Background
   // ─────────────────────────────────────────────────────────────────
   addBackground(worldW, worldH) {
     const clouds = this.add.graphics().setScrollFactor(0.15).setDepth(-8);
     clouds.fillStyle(0xffffff, 0.92);
-    // World Y 100–360: visible in the sky band whether player stands or jumps
     [
       [230, 130, 140, 48], [620, 100, 108, 38], [980, 175, 165, 54],
       [1360, 115, 125, 44], [1730, 200, 150, 52], [2110, 110, 115, 40],
@@ -211,16 +203,16 @@ class GameScene extends Phaser.Scene {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  //  Level — 3 pits with spikes; grass surface + solid dirt fill
+  //  Level layout
   //
-  //  Tile map (each tile = TS = 96 px display):
-  //    [0-10]  grass section 1   (11 tiles)
-  //    [11-12] PIT 1             (2 tiles)
-  //    [13-20] grass section 2   (8 tiles)
-  //    [21-22] PIT 2             (2 tiles)
-  //    [23-30] grass section 3   (8 tiles)
-  //    [31-32] PIT 3             (2 tiles)
-  //    [33-37] grass section 4   (5 tiles)
+  //  Tile map (TS = 96px display each):
+  //    [0-10]  grass section 1   right edge x=1008
+  //    [11-12] PIT 1             x 1008→1200
+  //    [13-20] grass section 2   right edge x=1968
+  //    [21-22] PIT 2             x 1968→2160
+  //    [23-30] grass section 3   right edge x=2928
+  //    [31-32] PIT 3             x 2928→3120
+  //    [33-37] grass section 4
   // ─────────────────────────────────────────────────────────────────
   buildLevel(worldW, worldH, floorY) {
     const grass = (startX, cols) => {
@@ -234,36 +226,52 @@ class GameScene extends Phaser.Scene {
     const plat = (x, y) =>
       this.platforms.create(x, y, 'platform').setScale(SCALE).refreshBody();
 
-    // Grass surface (skipping pit columns 11-12, 21-22, 31-32)
-    grass(0,       11);    // tiles  0-10
-    grass(13 * TS,  8);    // tiles 13-20
-    grass(23 * TS,  8);    // tiles 23-30
-    grass(33 * TS,  5);    // tiles 33-37
+    grass(0,        11);   // tiles  0-10
+    grass(13 * TS,   8);   // tiles 13-20
+    grass(23 * TS,   8);   // tiles 23-30
+    grass(33 * TS,   5);   // tiles 33-37
 
-    // 4 full-width dirt rows below (pits included — player lands here + hits spike)
     const totalCols = Math.ceil(worldW / TS) + 1;
     for (let row = 1; row <= 4; row++) dirtRow(floorY + row * TS, totalCols);
 
-    // Floating platforms — one tile, placed to help navigate pits
-    plat( 5 * TS, floorY - 1 * TS);   // approach to pit 1
-    plat(12 * TS, floorY - 2 * TS);   // directly above pit 1 (bridge)
-    plat(17 * TS, floorY - 1 * TS);   // mid section 2
-    plat(22 * TS, floorY - 2 * TS);   // above pit 2 (bridge)
-    plat(27 * TS, floorY - 1 * TS);   // mid section 3
+    // Platforms — bridge above each pit + mid-section steps
+    plat( 5 * TS, floorY - 1 * TS);
+    plat(12 * TS, floorY - 2 * TS);   // bridge over pit 1
+    plat(17 * TS, floorY - 1 * TS);
+    plat(22 * TS, floorY - 2 * TS);   // bridge over pit 2
+    plat(27 * TS, floorY - 1 * TS);
     plat(33 * TS, floorY - 2 * TS);   // approach to chest
   }
 
   // ─────────────────────────────────────────────────────────────────
-  //  Spikes — placed at pit base, one per tile column
+  //  Spikes — 8×8 texture at SCALE=3 → 24px display each.
+  //  Packed edge-to-edge (step=24) so no gap exists to walk through.
+  //
+  //  Pit edges (world x):
+  //    Pit 1: 1008 – 1200  (192px → 8 spikes)
+  //    Pit 2: 1968 – 2160  (192px → 8 spikes)
+  //    Pit 3: 2928 – 3120  (192px → 8 spikes)
   // ─────────────────────────────────────────────────────────────────
-  buildSpikes() {
-    // Tile columns that are pit gaps
-    [11, 12,  21, 22,  31, 32].forEach(t => {
-      const s = this.spikes.create(t * TS, this._spikeY, 'spike');
-      s.setScale(SCALE);
-      // Physics body covers the upper (tip) half only — the deadly point
-      s.body.setSize(10, 8).setOffset(3, 0);
-      s.refreshBody();
+  buildSpikes(floorY) {
+    const SW = 8 * SCALE;                    // spike display width  = 24
+    const SH = 8 * SCALE;                    // spike display height = 24
+    const pitFloor = floorY + TS / 2;        // top of dirt row 1   = 864
+    const spikeY   = pitFloor - SH / 2;      // sprite centre        = 852
+
+    const pitEdges = [
+      [10 * TS + TS / 2, 13 * TS - TS / 2],  // 1008 → 1200
+      [20 * TS + TS / 2, 23 * TS - TS / 2],  // 1968 → 2160
+      [30 * TS + TS / 2, 33 * TS - TS / 2],  // 2928 → 3120
+    ];
+
+    pitEdges.forEach(([left, right]) => {
+      for (let x = left + SW / 2; x < right; x += SW) {
+        const s = this.spikes.create(x, spikeY, 'spike');
+        s.setScale(SCALE);
+        // Physics body = upper 6×6 texture units (the dangerous tip)
+        s.body.setSize(6, 6).setOffset(1, 0);
+        s.refreshBody();
+      }
     });
   }
 
@@ -286,7 +294,6 @@ class GameScene extends Phaser.Scene {
       p.sprite.body.setVelocity(0, 0);
       p.jumpsLeft = 2;
 
-      // Invincibility flicker
       this.tweens.add({
         targets: p.sprite, alpha: 0.35,
         duration: 75, yoyo: true, repeat: 7,
@@ -296,7 +303,7 @@ class GameScene extends Phaser.Scene {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  //  Player
+  //  Player / Dummy / Chest
   // ─────────────────────────────────────────────────────────────────
   createPlayer(x, y) {
     const sprite = this.physics.add.sprite(x, y, 'player_idle')
@@ -306,16 +313,14 @@ class GameScene extends Phaser.Scene {
   }
 
   createDummy(x, y) {
-    const sprite = this.physics.add.sprite(x, y, 'dummy')
-      .setScale(SCALE).setImmovable(true);
+    const sprite = this.physics.add.sprite(x, y, 'dummy').setScale(SCALE).setImmovable(true);
     sprite.body.setAllowGravity(false).setSize(23, 23).setOffset(2, 1);
     const maxHp = 5;
     return { sprite, hp: maxHp, maxHp, dead: false };
   }
 
   createChest(x, y) {
-    const sprite = this.physics.add.sprite(x, y, 'chest')
-      .setScale(SCALE).setImmovable(true);
+    const sprite = this.physics.add.sprite(x, y, 'chest').setScale(SCALE).setImmovable(true);
     sprite.body.setAllowGravity(false).setSize(12, 14).setOffset(1, 1);
     return { sprite, opened: false };
   }
@@ -366,7 +371,7 @@ class GameScene extends Phaser.Scene {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  //  Update
+  //  Update loop
   // ─────────────────────────────────────────────────────────────────
   update(time, delta) {
     this.updatePlayer(delta);
@@ -381,7 +386,6 @@ class GameScene extends Phaser.Scene {
 
     if (p.isAttacking) { this.applyHorizontalMove(p, k, 0.6); return; }
 
-    // Attack
     if ((k.e.isDown || k.comma.isDown) && p.attackCooldown <= 0) {
       p.isAttacking = true; p.attackCooldown = 600;
       s.anims.play('attack', true);
@@ -390,7 +394,6 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Jump (double-jump)
     const jp = k.up.isDown || k.w.isDown;
     if (jp && !this._jumpHeld && p.jumpsLeft > 0) {
       bod.setVelocityY(-Math.sqrt(2 * Math.abs(this.physics.world.gravity.y) * TS));
@@ -399,7 +402,6 @@ class GameScene extends Phaser.Scene {
     }
     this._jumpHeld = jp;
 
-    // Duck
     if ((k.down.isDown || k.s.isDown) && onGround) {
       s.anims.play('duck', true); bod.setVelocityX(0); return;
     }
@@ -422,29 +424,20 @@ class GameScene extends Phaser.Scene {
     else                                    { s.body.setVelocityX(0); }
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  //  Attack hit detection
-  // ─────────────────────────────────────────────────────────────────
   checkAttackHit() {
     const ps = this.player.sprite, reach = TS * 1.3;
-
     if (this.dummy && !this.dummy.dead) {
       const ds = this.dummy.sprite;
       const facing = ps.flipX ? ds.x > ps.x : ds.x < ps.x;
-      if (Math.abs(ps.x-ds.x) < reach && Math.abs(ps.y-ds.y) < TS && facing)
-        this.hitDummy();
+      if (Math.abs(ps.x-ds.x) < reach && Math.abs(ps.y-ds.y) < TS && facing) this.hitDummy();
     }
     if (this.chest && !this.chest.opened) {
       const cs = this.chest.sprite;
       const facing = ps.flipX ? cs.x > ps.x : cs.x < ps.x;
-      if (Math.abs(ps.x-cs.x) < reach && Math.abs(ps.y-cs.y) < TS && facing)
-        this.openChest();
+      if (Math.abs(ps.x-cs.x) < reach && Math.abs(ps.y-cs.y) < TS && facing) this.openChest();
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  //  Dummy
-  // ─────────────────────────────────────────────────────────────────
   hitDummy() {
     const d = this.dummy;
     d.hp = Math.max(0, d.hp - 1);
@@ -453,7 +446,7 @@ class GameScene extends Phaser.Scene {
       d.sprite.anims.play('dummy_hit', true);
       this.time.delayedCall(150, () => {
         d.sprite.setTint(0x550000);
-        this.tweens.add({ targets: d.sprite, angle:90, alpha:0, duration:400, ease:'Power2',
+        this.tweens.add({ targets:d.sprite, angle:90, alpha:0, duration:400, ease:'Power2',
           onComplete: () => d.sprite.destroy() });
         this.dummyBar.bg.setVisible(false);
         this.dummyBar.fg.setVisible(false);
@@ -477,15 +470,12 @@ class GameScene extends Phaser.Scene {
     bar.label.setPosition(bx, by-10).setText(`HP: ${this.dummy.hp} / ${this.dummy.maxHp}`);
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  //  Chest
-  // ─────────────────────────────────────────────────────────────────
   openChest() {
     const c = this.chest;
     if (c.opened) return;
     c.opened = true;
     c.sprite.anims.play('chest_open', true);
-    this.tweens.add({ targets: c.sprite, scaleX: SCALE*1.2, scaleY: SCALE*1.2,
+    this.tweens.add({ targets:c.sprite, scaleX:SCALE*1.2, scaleY:SCALE*1.2,
       duration:120, yoyo:true, repeat:2 });
     this.time.delayedCall(400, () => {
       this.victoryText.setVisible(true);
@@ -495,12 +485,20 @@ class GameScene extends Phaser.Scene {
 }
 
 // ── Boot ─────────────────────────────────────
+// Phaser.Scale.FIT scales the 800×480 canvas to fill the browser window
+// while maintaining aspect ratio.  backgroundColor matches the sky so
+// any slim letterbox is invisible.
 new Phaser.Game({
   type:   Phaser.AUTO,
-  width:  800,
-  height: 480,
   parent: 'game-container',
+  backgroundColor: '#eef8ff',
   pixelArt: true,
+  scale: {
+    mode:       Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width:  800,
+    height: 480,
+  },
   physics: { default:'arcade', arcade:{ gravity:{ y:600 }, debug:false } },
   scene:  [PreloadScene, MenuScene, GameScene]
 });

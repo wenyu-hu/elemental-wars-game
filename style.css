@@ -5,15 +5,14 @@
 }
 
 body {
-  background: #eef8ff;   /* match game sky — no dark seam around canvas */
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
+  background: #eef8ff;   /* matches game sky — letterbox is invisible */
   overflow: hidden;
 }
 
-#game-container canvas {
+/* Phaser FIT mode centres the canvas automatically via inline style.
+   We just need pixel-perfect rendering on the canvas element. */
+canvas {
   display: block;
   image-rendering: pixelated;
+  image-rendering: crisp-edges;   /* Firefox fallback */
 }
