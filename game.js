@@ -403,14 +403,20 @@ class GameScene extends Phaser.Scene {
     this._jumpHeld = jp;
 
     if ((k.down.isDown || k.s.isDown) && onGround) {
-      s.anims.play('duck', true); bod.setVelocityX(0); return;
+      // Duck: play crouch anim but still allow slow horizontal movement
+      s.anims.play('duck', true);
+      this.applyHorizontalMove(p, k, 0.4);
+      return;
     }
 
     this.applyHorizontalMove(p, k, 1);
 
+    // Base animation off key state, not velocity, so it responds the instant
+    // a direction key is pressed (no one-frame lag from the physics solver).
+    const movingH = k.left.isDown || k.a.isDown || k.right.isDown || k.d.isDown;
     if (!onGround) {
       if (s.anims.currentAnim?.key !== 'jump') s.anims.play('jump', true);
-    } else if (Math.abs(bod.velocity.x) > 10) {
+    } else if (movingH) {
       s.anims.play('walk', true);
     } else {
       s.anims.play('idle', true);
