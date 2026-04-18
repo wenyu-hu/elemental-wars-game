@@ -129,7 +129,9 @@ class GameScene extends Phaser.Scene {
     this._respawnX    = 120;
     this._respawnY    = groundTop - 120;
     this._spikeHit    = false;
-    this._wasOnGround = true;   // tracks previous-frame ground state for landing detection
+    this._wasOnGround = true;
+    this._squashActive = false;   // true while squash tween is running (prevents re-trigger)
+    this._ssTween      = null;    // holds the active squash OR stretch tween reference
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
     this.cameras.main.setBackgroundColor(0xeef8ff);
@@ -286,34 +288,46 @@ class GameScene extends Phaser.Scene {
   // ─────────────────────────────────────────────────────────────────
   // ─────────────────────────────────────────────────────────────────
   //  Squash-and-stretch helpers
+  //
+  //  Rules that prevent the three bugs:
+  //  • Only ONE tween (_ssTween) runs at a time — stopped via its own
+  //    reference so we NEVER call killTweensOf (which would kill the
+  //    invincibility tween and leave _spikeHit = true forever).
+  //  • _squashActive flag blocks re-triggering while the squash runs,
+  //    stopping the spam+phase loop caused by the body briefly lifting.
+  //  • stretchPlayer clears _squashActive before stopping the tween so
+  //    a mid-squash jump doesn't leave the flag stuck on.
   // ─────────────────────────────────────────────────────────────────
   squashPlayer() {
+    if (this._squashActive) return;          // already squashing — skip
+    this._squashActive = true;
+    if (this._ssTween) { this._ssTween.stop(); this._ssTween = null; }
     const s = this.player.sprite;
-    this.tweens.killTweensOf(s);        // cancel any in-flight stretch
-    s.setScale(SCALE);                  // reset before tweening
-    this.tweens.add({
+    s.setScale(SCALE);
+    this._ssTween = this.tweens.add({
       targets: s,
-      scaleX: SCALE * 1.35,
-      scaleY: SCALE * 0.70,
+      scaleX: SCALE * 1.1,
+      scaleY: SCALE * 0.95,
       duration: 55,
       yoyo: true,
       ease: 'Sine.easeOut',
-      onComplete: () => s.setScale(SCALE),
+      onComplete: () => { s.setScale(SCALE); this._squashActive = false; this._ssTween = null; },
     });
   }
 
   stretchPlayer() {
+    this._squashActive = false;              // jump cancels any ongoing squash
+    if (this._ssTween) { this._ssTween.stop(); this._ssTween = null; }
     const s = this.player.sprite;
-    this.tweens.killTweensOf(s);        // cancel any in-flight squash
     s.setScale(SCALE);
-    this.tweens.add({
+    this._ssTween = this.tweens.add({
       targets: s,
-      scaleX: SCALE * 0.75,
-      scaleY: SCALE * 1.30,
+      scaleX: SCALE * 0.95,
+      scaleY: SCALE * 1.1,
       duration: 90,
       yoyo: true,
       ease: 'Sine.easeOut',
-      onComplete: () => s.setScale(SCALE),
+      onComplete: () => { s.setScale(SCALE); this._ssTween = null; },
     });
   }
 
@@ -324,8 +338,9 @@ class GameScene extends Phaser.Scene {
     const p = this.player;
     p.isAttacking = false;
     p.sprite.body.setVelocity(0, 0);
-    // Kill any squash/stretch tween and reset scale before the death flash
-    this.tweens.killTweensOf(p.sprite);
+    // Stop only the squash/stretch tween — never killTweensOf (would kill invincibility tween)
+    if (this._ssTween) { this._ssTween.stop(); this._ssTween = null; }
+    this._squashActive = false;
     p.sprite.setScale(SCALE);
     p.sprite.setTintFill(0xff4444);
     this.cameras.main.shake(140, 0.009);
@@ -428,7 +443,8 @@ class GameScene extends Phaser.Scene {
     if (p.attackCooldown > 0) p.attackCooldown -= delta;
 
     // ── Squash on landing ─────────────────────────────────────────
-    if (onGround && !this._wasOnGround) this.squashPlayer();
+    // _squashActive guard stops re-triggering while the tween is still running
+    if (onGround && !this._wasOnGround && !this._squashActive) this.squashPlayer();
     this._wasOnGround = onGround;
 
     if (p.isAttacking) { this.applyHorizontalMove(p, k, 0.6); return; }
