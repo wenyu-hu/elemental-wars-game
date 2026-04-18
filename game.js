@@ -3,9 +3,9 @@
 //  Phaser 3.60  |  32×32 sprite world
 // ─────────────────────────────────────────────
 
-const SCALE = 3;            // pixel-art upscale
-const TILE  = 32;           // base tile size
-const TS    = TILE * SCALE; // 96px display per tile
+const SCALE = 3;
+const TILE  = 32;
+const TS    = TILE * SCALE;   // 96px display per tile
 
 // ── PreloadScene ────────────────────────────
 class PreloadScene extends Phaser.Scene {
@@ -22,6 +22,7 @@ class PreloadScene extends Phaser.Scene {
     this.load.image('ground',   'assets/ground.png');
     this.load.image('dirt',     'assets/dirt.png');
     this.load.image('platform', 'assets/platform.png');
+    this.load.image('spike',    'assets/spike.png');
   }
 
   create() {
@@ -30,39 +31,30 @@ class PreloadScene extends Phaser.Scene {
   }
 
   buildFallbacks() {
-    const makeSheet = (key, hexColor, numFrames, fw = 32, fh = 32) => {
+    const makeSheet = (key, col, nf, fw = 32, fh = 32) => {
       if (this.textures.exists(key)) return;
-      const canvas  = document.createElement('canvas');
-      canvas.width  = fw * numFrames;
-      canvas.height = fh;
-      const ctx = canvas.getContext('2d');
-      const r = (hexColor >> 16) & 0xff;
-      const g = (hexColor >>  8) & 0xff;
-      const b =  hexColor        & 0xff;
-      for (let i = 0; i < numFrames; i++) {
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.fillRect(i * fw, 0, fw, fh);
-        ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-        ctx.lineWidth   = 1;
-        ctx.strokeRect(i * fw + 0.5, 0.5, fw - 1, fh - 1);
+      const cv = document.createElement('canvas');
+      cv.width = fw * nf; cv.height = fh;
+      const cx = cv.getContext('2d');
+      const r = (col>>16)&0xff, g = (col>>8)&0xff, b = col&0xff;
+      for (let i = 0; i < nf; i++) {
+        cx.fillStyle = `rgb(${r},${g},${b})`;
+        cx.fillRect(i*fw, 0, fw, fh);
+        cx.strokeStyle = 'rgba(0,0,0,0.3)';
+        cx.strokeRect(i*fw+.5, .5, fw-1, fh-1);
       }
-      const tex = this.textures.addCanvas(key, canvas);
-      for (let i = 0; i < numFrames; i++) tex.add(i, 0, i * fw, 0, fw, fh);
+      const tex = this.textures.addCanvas(key, cv);
+      for (let i = 0; i < nf; i++) tex.add(i, 0, i*fw, 0, fw, fh);
     };
-
-    const makeImg = (key, hexColor, w = 32, h = 32) => {
+    const makeImg = (key, col, w = 32, h = 32) => {
       if (this.textures.exists(key)) return;
-      const canvas  = document.createElement('canvas');
-      canvas.width  = w; canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      const r = (hexColor >> 16) & 0xff;
-      const g = (hexColor >>  8) & 0xff;
-      const b =  hexColor        & 0xff;
-      ctx.fillStyle = `rgb(${r},${g},${b})`;
-      ctx.fillRect(0, 0, w, h);
-      this.textures.addCanvas(key, canvas);
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      const cx = cv.getContext('2d');
+      cx.fillStyle = `rgb(${(col>>16)&0xff},${(col>>8)&0xff},${col&0xff})`;
+      cx.fillRect(0, 0, w, h);
+      this.textures.addCanvas(key, cv);
     };
-
     makeSheet('player_idle',   0x4488ff, 1, 18, 31);
     makeSheet('player_walk',   0x4488ff, 4, 18, 31);
     makeSheet('player_jump',   0x44aaff, 3, 18, 31);
@@ -73,6 +65,7 @@ class PreloadScene extends Phaser.Scene {
     makeImg  ('ground',        0x4a9944, 32, 32);
     makeImg  ('dirt',          0x3d2008, 32, 32);
     makeImg  ('platform',      0x8b5e3c, 32,  6);
+    makeImg  ('spike',         0xddddcc, 16, 16);
   }
 }
 
@@ -82,50 +75,44 @@ class MenuScene extends Phaser.Scene {
 
   create() {
     const { width, height } = this.scale;
-
     this.add.rectangle(0, 0, width, height, 0xeef8ff).setOrigin(0);
 
-    // Clouds
     const cg = this.add.graphics();
     cg.fillStyle(0xffffff, 0.9);
-    [[90, 75, 130, 44], [280, 52, 100, 36], [500, 85, 150, 48],
-     [680, 58, 110, 38], [760, 110, 90, 32]].forEach(([x, y, w, h]) => {
-      cg.fillEllipse(x, y, w, h);
-      cg.fillEllipse(x - w * 0.22, y - h * 0.28, w * 0.55, h * 0.65);
-      cg.fillEllipse(x + w * 0.18, y - h * 0.22, w * 0.50, h * 0.60);
-    });
+    [[90,75,130,44],[280,52,100,36],[500,85,150,48],[680,58,110,38],[760,110,90,32]]
+      .forEach(([x,y,w,h]) => {
+        cg.fillEllipse(x,y,w,h);
+        cg.fillEllipse(x-w*.22,y-h*.28,w*.55,h*.65);
+        cg.fillEllipse(x+w*.18,y-h*.22,w*.50,h*.60);
+      });
 
-    // Ground strip
-    this.add.rectangle(0, height - 54, width, 54, 0x6dbf67).setOrigin(0);
-    this.add.rectangle(0, height - 54, width,  9, 0x52a84f).setOrigin(0);
+    this.add.rectangle(0, height-54, width, 54, 0x6dbf67).setOrigin(0);
+    this.add.rectangle(0, height-54, width,  9, 0x52a84f).setOrigin(0);
 
-    // Title
-    this.add.text(width / 2, height / 2 - 90, 'ELEMENTAL WARS', {
+    this.add.text(width/2, height/2-90, 'ELEMENTAL WARS', {
       fontSize: '42px', fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ff5722', stroke: '#ffffff', strokeThickness: 7,
+      color: '#ff5722', stroke: '#ffffff', strokeThickness: 7
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, height / 2 - 38, 'Tutorial Level', {
+    this.add.text(width/2, height/2-38, 'Tutorial Level', {
       fontSize: '20px', fontFamily: 'Arial, sans-serif', color: '#2d6a4f'
     }).setOrigin(0.5);
 
-    // Play button
-    const btn = this.add.text(width / 2, height / 2 + 28, '  PLAY  ', {
+    const btn = this.add.text(width/2, height/2+28, '  PLAY  ', {
       fontSize: '26px', fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffffff', backgroundColor: '#ff5722', padding: { x: 28, y: 13 }
+      color: '#ffffff', backgroundColor: '#ff5722', padding: { x:28, y:13 }
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
 
     btn.on('pointerover', () => btn.setStyle({ backgroundColor: '#e64a19' }));
     btn.on('pointerout',  () => btn.setStyle({ backgroundColor: '#ff5722' }));
     btn.on('pointerup',   () => this.scene.start('GameScene'));
-
     this.input.keyboard.once('keydown-ENTER', () => this.scene.start('GameScene'));
     this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
 
-    this.add.text(width / 2, height - 24,
-      'Arrow keys / WASD  ·  ↑/W = jump (×2)  ·  ↓/S = duck  ·  E or , = attack', {
-      fontSize: '11px', fontFamily: 'monospace', color: '#2d6a4f'
-    }).setOrigin(0.5);
+    this.add.text(width/2, height-24,
+      'Arrow keys / WASD  ·  ↑/W = jump (×2)  ·  ↓/S = duck  ·  E or , = attack',
+      { fontSize:'11px', fontFamily:'monospace', color:'#2d6a4f' }
+    ).setOrigin(0.5);
   }
 }
 
@@ -135,46 +122,65 @@ class GameScene extends Phaser.Scene {
 
   create() {
     const WORLD_W  = 3600;
-    const WORLD_H  = 1200;                    // tall world — room for camera to follow jumps
-    const floorY   = WORLD_H - 4 * TS;       // grass-tile centre: 816
-    const groundTop = floorY - TS / 2;       // top surface of grass: 768
+    const WORLD_H  = 1200;
+    const floorY   = WORLD_H - 4 * TS;         // grass tile centre  y = 816
+    const groundTop = floorY - TS / 2;          // grass surface      y = 768
+    const pitFloor  = floorY + TS / 2;          // dirt row-1 top     y = 864
+
+    // Spike sits on pit floor — tip pokes up through the gap
+    const spikeDisplayH = 16 * SCALE;           // 48 px display
+    this._spikeY = pitFloor - spikeDisplayH / 2; // sprite centre y = 840
+
+    // Respawn anchor
+    this._respawnX = 120;
+    this._respawnY = groundTop - 120;
+    this._spikeHit = false;
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
-
-    // Sky colour — fills every pixel the camera sees, no seam possible
     this.cameras.main.setBackgroundColor(0xeef8ff);
-    this.addBackground(WORLD_W, WORLD_H, groundTop);
+    this.addBackground(WORLD_W, WORLD_H);
 
-    // Level
+    // ── Level, entities ──────────────────────────────────────────────
     this.platforms = this.physics.add.staticGroup();
     this.buildLevel(WORLD_W, WORLD_H, floorY);
 
-    // Entities
-    this.player = this.createPlayer(120,  groundTop - 120);
-    this.dummy  = this.createDummy(1800,  groundTop - 25 * SCALE / 2);
-    this.chest  = this.createChest(3000,  groundTop - 16 * SCALE / 2);
+    this.player = this.createPlayer(this._respawnX, this._respawnY);
+    this.dummy  = this.createDummy(1800, groundTop - 25 * SCALE / 2);
+    this.chest  = this.createChest(3000, groundTop - 16 * SCALE / 2);
 
-    // Colliders
+    this.spikes = this.physics.add.staticGroup();
+    this.buildSpikes();
+
+    // ── Colliders ────────────────────────────────────────────────────
     this.physics.add.collider(this.player.sprite, this.platforms);
     this.physics.add.collider(this.dummy.sprite,  this.platforms);
     this.physics.add.collider(this.chest.sprite,  this.platforms);
 
-    // Camera — zoomed-out Dadish feel, follows player in both axes
-    this.cameras.main.setZoom(0.65);
-    this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);   // full world, vertical included
-    this.cameras.main.startFollow(this.player.sprite, true, 0.12, 0.10);
+    // Spike overlap → respawn
+    this.physics.add.overlap(
+      this.player.sprite, this.spikes,
+      () => this.respawnPlayer(), null, this
+    );
 
-    // Input
+    // ── Camera ───────────────────────────────────────────────────────
+    // followOffset(0, -174) shifts focus 174 world-units above the player,
+    // so the player sits at ~75% from top and ground takes up ~20% of screen.
+    this.cameras.main.setZoom(0.65);
+    this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
+    this.cameras.main.startFollow(this.player.sprite, true, 0.12, 0.10);
+    this.cameras.main.setFollowOffset(0, -174);
+
+    // ── Input ────────────────────────────────────────────────────────
     this.keys = this.input.keyboard.addKeys({
       left:  Phaser.Input.Keyboard.KeyCodes.LEFT,
       right: Phaser.Input.Keyboard.KeyCodes.RIGHT,
       up:    Phaser.Input.Keyboard.KeyCodes.UP,
       down:  Phaser.Input.Keyboard.KeyCodes.DOWN,
-      a:     Phaser.Input.Keyboard.KeyCodes.A,
-      d:     Phaser.Input.Keyboard.KeyCodes.D,
-      w:     Phaser.Input.Keyboard.KeyCodes.W,
-      s:     Phaser.Input.Keyboard.KeyCodes.S,
-      e:     Phaser.Input.Keyboard.KeyCodes.E,
+      a: Phaser.Input.Keyboard.KeyCodes.A,
+      d: Phaser.Input.Keyboard.KeyCodes.D,
+      w: Phaser.Input.Keyboard.KeyCodes.W,
+      s: Phaser.Input.Keyboard.KeyCodes.S,
+      e: Phaser.Input.Keyboard.KeyCodes.E,
       comma: Phaser.Input.Keyboard.KeyCodes.COMMA,
     });
     this._jumpHeld = false;
@@ -187,66 +193,106 @@ class GameScene extends Phaser.Scene {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  //  Background — camera colour handles sky, Graphics adds clouds
+  //  Background — camera colour handles sky; Graphics adds clouds
   // ─────────────────────────────────────────────────────────────────
-  addBackground(worldW, worldH, groundTop) {
-    // Clouds drift slowly left-right (parallax X=0.15, Y=0.15 so they also
-    // drift very gently up/down as camera follows jumps — looks natural)
+  addBackground(worldW, worldH) {
     const clouds = this.add.graphics().setScrollFactor(0.15).setDepth(-8);
     clouds.fillStyle(0xffffff, 0.92);
-
-    // Positioned at world Y ≈ 200–450 so they sit in the sky band
-    // that is visible whether the player is standing or jumping
+    // World Y 100–360: visible in the sky band whether player stands or jumps
     [
-      [230,  230, 140, 48], [600,  195, 108, 38], [960,  260, 165, 54],
-      [1340, 215, 125, 44], [1720, 285, 150, 52], [2100, 205, 115, 40],
-      [2470, 250, 158, 50], [2850, 225, 128, 45], [3200, 270, 145, 50],
+      [230, 130, 140, 48], [620, 100, 108, 38], [980, 175, 165, 54],
+      [1360, 115, 125, 44], [1730, 200, 150, 52], [2110, 110, 115, 40],
+      [2480, 155, 158, 50], [2860, 120, 128, 45], [3210, 185, 145, 50],
     ].forEach(([cx, cy, cw, ch]) => {
-      clouds.fillEllipse(cx,             cy,           cw,       ch);
+      clouds.fillEllipse(cx,             cy,            cw,        ch);
       clouds.fillEllipse(cx - cw * 0.22, cy - ch * 0.28, cw * 0.55, ch * 0.65);
       clouds.fillEllipse(cx + cw * 0.18, cy - ch * 0.22, cw * 0.50, ch * 0.60);
     });
   }
 
   // ─────────────────────────────────────────────────────────────────
-  //  Level — grass on top, solid dirt filling down to the world floor
+  //  Level — 3 pits with spikes; grass surface + solid dirt fill
+  //
+  //  Tile map (each tile = TS = 96 px display):
+  //    [0-10]  grass section 1   (11 tiles)
+  //    [11-12] PIT 1             (2 tiles)
+  //    [13-20] grass section 2   (8 tiles)
+  //    [21-22] PIT 2             (2 tiles)
+  //    [23-30] grass section 3   (8 tiles)
+  //    [31-32] PIT 3             (2 tiles)
+  //    [33-37] grass section 4   (5 tiles)
   // ─────────────────────────────────────────────────────────────────
   buildLevel(worldW, worldH, floorY) {
     const grass = (startX, cols) => {
-      for (let i = 0; i < cols; i++) {
-        this.platforms.create(startX + i * TS, floorY, 'ground')
-          .setScale(SCALE).refreshBody();
-      }
+      for (let i = 0; i < cols; i++)
+        this.platforms.create(startX + i * TS, floorY, 'ground').setScale(SCALE).refreshBody();
     };
-
-    const dirt = (startX, y, cols) => {
-      for (let i = 0; i < cols; i++) {
-        this.platforms.create(startX + i * TS, y, 'dirt')
-          .setScale(SCALE).refreshBody();
-      }
+    const dirtRow = (y, cols) => {
+      for (let i = 0; i < cols; i++)
+        this.platforms.create(i * TS, y, 'dirt').setScale(SCALE).refreshBody();
     };
-
-    const plat = (x, y) => {
+    const plat = (x, y) =>
       this.platforms.create(x, y, 'platform').setScale(SCALE).refreshBody();
-    };
 
-    // ── Grass surface (two sections, small gap at tile 16) ──
-    grass(0,       16);   // tiles 0-15
-    grass(17 * TS, 22);   // tiles 17-38
+    // Grass surface (skipping pit columns 11-12, 21-22, 31-32)
+    grass(0,       11);    // tiles  0-10
+    grass(13 * TS,  8);    // tiles 13-20
+    grass(23 * TS,  8);    // tiles 23-30
+    grass(33 * TS,  5);    // tiles 33-37
 
-    // ── Dirt fill: 4 rows below the grass, full width including the gap ──
-    // This makes the ground look solid and reach the bottom of the world
+    // 4 full-width dirt rows below (pits included — player lands here + hits spike)
     const totalCols = Math.ceil(worldW / TS) + 1;
-    for (let row = 1; row <= 4; row++) {
-      dirt(0, floorY + row * TS, totalCols);
-    }
+    for (let row = 1; row <= 4; row++) dirtRow(floorY + row * TS, totalCols);
 
-    // ── Floating platforms — single tile, reachable with 1–2 jumps ──
-    plat(6  * TS, floorY - 1 * TS);
-    plat(12 * TS, floorY - 2 * TS);
-    plat(19 * TS, floorY - 1 * TS);
-    plat(26 * TS, floorY - 2 * TS);
-    plat(33 * TS, floorY - 1 * TS);
+    // Floating platforms — one tile, placed to help navigate pits
+    plat( 5 * TS, floorY - 1 * TS);   // approach to pit 1
+    plat(12 * TS, floorY - 2 * TS);   // directly above pit 1 (bridge)
+    plat(17 * TS, floorY - 1 * TS);   // mid section 2
+    plat(22 * TS, floorY - 2 * TS);   // above pit 2 (bridge)
+    plat(27 * TS, floorY - 1 * TS);   // mid section 3
+    plat(33 * TS, floorY - 2 * TS);   // approach to chest
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  //  Spikes — placed at pit base, one per tile column
+  // ─────────────────────────────────────────────────────────────────
+  buildSpikes() {
+    // Tile columns that are pit gaps
+    [11, 12,  21, 22,  31, 32].forEach(t => {
+      const s = this.spikes.create(t * TS, this._spikeY, 'spike');
+      s.setScale(SCALE);
+      // Physics body covers the upper (tip) half only — the deadly point
+      s.body.setSize(10, 8).setOffset(3, 0);
+      s.refreshBody();
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  //  Respawn on spike contact
+  // ─────────────────────────────────────────────────────────────────
+  respawnPlayer() {
+    if (this._spikeHit) return;
+    this._spikeHit = true;
+
+    const p = this.player;
+    p.isAttacking = false;
+    p.sprite.body.setVelocity(0, 0);
+    p.sprite.setTintFill(0xff4444);
+    this.cameras.main.shake(140, 0.009);
+
+    this.time.delayedCall(280, () => {
+      p.sprite.clearTint();
+      p.sprite.setPosition(this._respawnX, this._respawnY);
+      p.sprite.body.setVelocity(0, 0);
+      p.jumpsLeft = 2;
+
+      // Invincibility flicker
+      this.tweens.add({
+        targets: p.sprite, alpha: 0.35,
+        duration: 75, yoyo: true, repeat: 7,
+        onComplete: () => { p.sprite.setAlpha(1); this._spikeHit = false; }
+      });
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -254,34 +300,23 @@ class GameScene extends Phaser.Scene {
   // ─────────────────────────────────────────────────────────────────
   createPlayer(x, y) {
     const sprite = this.physics.add.sprite(x, y, 'player_idle')
-      .setScale(SCALE)
-      .setCollideWorldBounds(true)
-      .setFlipX(true);  // start facing right
-
+      .setScale(SCALE).setCollideWorldBounds(true).setFlipX(true);
     sprite.body.setSize(14, 27).setOffset(2, 2);
     return { sprite, jumpsLeft: 2, isAttacking: false, attackCooldown: 0 };
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  //  Training Dummy
-  // ─────────────────────────────────────────────────────────────────
   createDummy(x, y) {
     const sprite = this.physics.add.sprite(x, y, 'dummy')
       .setScale(SCALE).setImmovable(true);
-    sprite.body.setAllowGravity(false);
-    sprite.body.setSize(23, 23).setOffset(2, 1);
+    sprite.body.setAllowGravity(false).setSize(23, 23).setOffset(2, 1);
     const maxHp = 5;
     return { sprite, hp: maxHp, maxHp, dead: false };
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  //  Chest
-  // ─────────────────────────────────────────────────────────────────
   createChest(x, y) {
     const sprite = this.physics.add.sprite(x, y, 'chest')
       .setScale(SCALE).setImmovable(true);
-    sprite.body.setAllowGravity(false);
-    sprite.body.setSize(12, 14).setOffset(1, 1);
+    sprite.body.setAllowGravity(false).setSize(12, 14).setOffset(1, 1);
     return { sprite, opened: false };
   }
 
@@ -289,11 +324,10 @@ class GameScene extends Phaser.Scene {
   //  Animations
   // ─────────────────────────────────────────────────────────────────
   buildAnims() {
-    const add = (key, sheet, start, end, fps, repeat = -1) => {
-      if (!this.anims.exists(key)) {
+    const add = (key, sheet, s, e, fps, repeat = -1) => {
+      if (!this.anims.exists(key))
         this.anims.create({ key, frameRate: fps, repeat,
-          frames: this.anims.generateFrameNumbers(sheet, { start, end }) });
-      }
+          frames: this.anims.generateFrameNumbers(sheet, { start:s, end:e }) });
     };
     add('idle',         'player_idle',   0, 0,  4);
     add('walk',         'player_walk',   0, 3,  8);
@@ -317,19 +351,17 @@ class GameScene extends Phaser.Scene {
     }).setOrigin(0.5, 1);
     this.dummyBar = { bg: barBg, fg: barFg, label: barLabel };
 
-    // Controls strip — fixed to screen (scrollFactor 0 = unaffected by camera zoom/scroll)
     const { width, height } = this.scale;
-    this.add.text(width / 2, 18,
-      'Arrow/WASD = move   ↑/W = jump (×2)   ↓/S = duck   E or , = attack', {
-      fontSize: '11px', fontFamily: 'monospace',
-      color: '#1a3a5c', backgroundColor: '#ffffffcc',
-      padding: { x: 10, y: 5 }
-    }).setOrigin(0.5, 0).setScrollFactor(0);
+    this.add.text(width/2, 18,
+      'Arrow/WASD = move   ↑/W = jump (×2)   ↓/S = duck   E or , = attack',
+      { fontSize:'11px', fontFamily:'monospace',
+        color:'#1a3a5c', backgroundColor:'#ffffffcc', padding:{x:10,y:5} }
+    ).setOrigin(0.5, 0).setScrollFactor(0);
 
-    this.victoryText = this.add.text(width / 2, height / 2, '  Level Complete!  ', {
-      fontSize: '36px', fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ff5722', stroke: '#ffffff', strokeThickness: 6,
-      backgroundColor: '#ffffffcc', padding: { x: 24, y: 14 }
+    this.victoryText = this.add.text(width/2, height/2, '  Level Complete!  ', {
+      fontSize:'36px', fontFamily:'"Arial Black", Arial, sans-serif',
+      color:'#ff5722', stroke:'#ffffff', strokeThickness:6,
+      backgroundColor:'#ffffffcc', padding:{x:24,y:14}
     }).setOrigin(0.5).setScrollFactor(0).setVisible(false).setDepth(10);
   }
 
@@ -341,48 +373,35 @@ class GameScene extends Phaser.Scene {
     this.updateDummyBar();
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  //  Player controller
-  // ─────────────────────────────────────────────────────────────────
   updatePlayer(delta) {
-    const p   = this.player;
-    const s   = p.sprite;
-    const bod = s.body;
-    const k   = this.keys;
-
+    const p = this.player, s = p.sprite, bod = s.body, k = this.keys;
     const onGround = bod.blocked.down;
     if (onGround) p.jumpsLeft = 2;
     if (p.attackCooldown > 0) p.attackCooldown -= delta;
 
-    if (p.isAttacking) {
-      this.applyHorizontalMove(p, k, 0.6);
-      return;
-    }
+    if (p.isAttacking) { this.applyHorizontalMove(p, k, 0.6); return; }
 
     // Attack
     if ((k.e.isDown || k.comma.isDown) && p.attackCooldown <= 0) {
-      p.isAttacking    = true;
-      p.attackCooldown = 600;
+      p.isAttacking = true; p.attackCooldown = 600;
       s.anims.play('attack', true);
       s.once('animationcomplete-attack', () => { p.isAttacking = false; });
       this.time.delayedCall(200, () => this.checkAttackHit());
       return;
     }
 
-    // Jump — allows mid-air second jump (double jump)
-    const jumpPressed = k.up.isDown || k.w.isDown;
-    if (jumpPressed && !this._jumpHeld && p.jumpsLeft > 0) {
+    // Jump (double-jump)
+    const jp = k.up.isDown || k.w.isDown;
+    if (jp && !this._jumpHeld && p.jumpsLeft > 0) {
       bod.setVelocityY(-Math.sqrt(2 * Math.abs(this.physics.world.gravity.y) * TS));
       p.jumpsLeft--;
       s.anims.play('jump', true);
     }
-    this._jumpHeld = jumpPressed;
+    this._jumpHeld = jp;
 
     // Duck
     if ((k.down.isDown || k.s.isDown) && onGround) {
-      s.anims.play('duck', true);
-      bod.setVelocityX(0);
-      return;
+      s.anims.play('duck', true); bod.setVelocityX(0); return;
     }
 
     this.applyHorizontalMove(p, k, 1);
@@ -396,41 +415,30 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  applyHorizontalMove(p, k, speedMult) {
-    const speed = 200 * speedMult;
-    const s     = p.sprite;
-    if (k.left.isDown || k.a.isDown) {
-      s.body.setVelocityX(-speed);
-      s.setFlipX(false);   // sprite naturally faces left
-    } else if (k.right.isDown || k.d.isDown) {
-      s.body.setVelocityX(speed);
-      s.setFlipX(true);    // flipped = faces right
-    } else {
-      s.body.setVelocityX(0);
-    }
+  applyHorizontalMove(p, k, mult) {
+    const spd = 200 * mult, s = p.sprite;
+    if      (k.left.isDown  || k.a.isDown) { s.body.setVelocityX(-spd); s.setFlipX(false); }
+    else if (k.right.isDown || k.d.isDown) { s.body.setVelocityX( spd); s.setFlipX(true);  }
+    else                                    { s.body.setVelocityX(0); }
   }
 
   // ─────────────────────────────────────────────────────────────────
   //  Attack hit detection
   // ─────────────────────────────────────────────────────────────────
   checkAttackHit() {
-    const ps    = this.player.sprite;
-    const reach = TS * 1.3;
+    const ps = this.player.sprite, reach = TS * 1.3;
 
     if (this.dummy && !this.dummy.dead) {
-      const ds     = this.dummy.sprite;
-      const dx     = Math.abs(ps.x - ds.x);
-      const dy     = Math.abs(ps.y - ds.y);
-      const facing = ps.flipX ? (ds.x > ps.x) : (ds.x < ps.x);
-      if (dx < reach && dy < TS && facing) this.hitDummy();
+      const ds = this.dummy.sprite;
+      const facing = ps.flipX ? ds.x > ps.x : ds.x < ps.x;
+      if (Math.abs(ps.x-ds.x) < reach && Math.abs(ps.y-ds.y) < TS && facing)
+        this.hitDummy();
     }
-
     if (this.chest && !this.chest.opened) {
-      const cs     = this.chest.sprite;
-      const dx     = Math.abs(ps.x - cs.x);
-      const dy     = Math.abs(ps.y - cs.y);
-      const facing = ps.flipX ? (cs.x > ps.x) : (cs.x < ps.x);
-      if (dx < reach && dy < TS && facing) this.openChest();
+      const cs = this.chest.sprite;
+      const facing = ps.flipX ? cs.x > ps.x : cs.x < ps.x;
+      if (Math.abs(ps.x-cs.x) < reach && Math.abs(ps.y-cs.y) < TS && facing)
+        this.openChest();
     }
   }
 
@@ -440,16 +448,13 @@ class GameScene extends Phaser.Scene {
   hitDummy() {
     const d = this.dummy;
     d.hp = Math.max(0, d.hp - 1);
-
     if (d.hp <= 0) {
       d.dead = true;
       d.sprite.anims.play('dummy_hit', true);
       this.time.delayedCall(150, () => {
         d.sprite.setTint(0x550000);
-        this.tweens.add({
-          targets: d.sprite, angle: 90, alpha: 0, duration: 400, ease: 'Power2',
-          onComplete: () => d.sprite.destroy()
-        });
+        this.tweens.add({ targets: d.sprite, angle:90, alpha:0, duration:400, ease:'Power2',
+          onComplete: () => d.sprite.destroy() });
         this.dummyBar.bg.setVisible(false);
         this.dummyBar.fg.setVisible(false);
         this.dummyBar.label.setVisible(false);
@@ -458,26 +463,18 @@ class GameScene extends Phaser.Scene {
       d.sprite.anims.play('dummy_hit', true);
       d.sprite.setTintFill(0xffffff);
       this.time.delayedCall(100, () => {
-        if (!d.dead) {
-          d.sprite.clearTint();
-          d.sprite.anims.play('dummy_idle', true);
-        }
+        if (!d.dead) { d.sprite.clearTint(); d.sprite.anims.play('dummy_idle', true); }
       });
     }
   }
 
   updateDummyBar() {
     if (this.dummy.dead) return;
-    const ds  = this.dummy.sprite;
-    const bar = this.dummyBar;
-    const barW = 80;
-    const bx  = ds.x;
-    const by  = ds.y - 25 * SCALE / 2 - 8;
-
+    const ds = this.dummy.sprite, bar = this.dummyBar, barW = 80;
+    const bx = ds.x, by = ds.y - 25*SCALE/2 - 8;
     bar.bg.setPosition(bx, by).setSize(barW, 10);
-    const pct = this.dummy.hp / this.dummy.maxHp;
-    bar.fg.setPosition(bx - barW / 2, by).setSize(barW * pct, 10);
-    bar.label.setPosition(bx, by - 10).setText(`HP: ${this.dummy.hp} / ${this.dummy.maxHp}`);
+    bar.fg.setPosition(bx - barW/2, by).setSize(barW * this.dummy.hp / this.dummy.maxHp, 10);
+    bar.label.setPosition(bx, by-10).setText(`HP: ${this.dummy.hp} / ${this.dummy.maxHp}`);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -488,10 +485,8 @@ class GameScene extends Phaser.Scene {
     if (c.opened) return;
     c.opened = true;
     c.sprite.anims.play('chest_open', true);
-    this.tweens.add({
-      targets: c.sprite, scaleX: SCALE * 1.2, scaleY: SCALE * 1.2,
-      duration: 120, yoyo: true, repeat: 2
-    });
+    this.tweens.add({ targets: c.sprite, scaleX: SCALE*1.2, scaleY: SCALE*1.2,
+      duration:120, yoyo:true, repeat:2 });
     this.time.delayedCall(400, () => {
       this.victoryText.setVisible(true);
       this.time.delayedCall(2500, () => this.scene.start('MenuScene'));
@@ -500,17 +495,12 @@ class GameScene extends Phaser.Scene {
 }
 
 // ── Boot ─────────────────────────────────────
-const config = {
-  type:            Phaser.AUTO,
-  width:           800,
-  height:          480,
-  parent:          'game-container',
-  pixelArt:        true,
-  physics: {
-    default: 'arcade',
-    arcade:  { gravity: { y: 600 }, debug: false }
-  },
-  scene: [PreloadScene, MenuScene, GameScene]
-};
-
-new Phaser.Game(config);
+new Phaser.Game({
+  type:   Phaser.AUTO,
+  width:  800,
+  height: 480,
+  parent: 'game-container',
+  pixelArt: true,
+  physics: { default:'arcade', arcade:{ gravity:{ y:600 }, debug:false } },
+  scene:  [PreloadScene, MenuScene, GameScene]
+});
