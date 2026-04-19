@@ -68,7 +68,7 @@ class PreloadScene extends Phaser.Scene {
     makeImg  ('platform',      0x8b5e3c, 32,  6);
     makeImg  ('spike',         0xddddcc,  8,  8);  // 8×8 fallback
     makeImg  ('dust',          0xd4c4a8,  4,  4);
-    makeImg  ('portal',        0x00ddff, 28, 48);   // cyan portal frame
+    makeImg  ('portal',        0x00ddff, 32, 32);   // portal fallback
   }
 }
 
@@ -154,7 +154,8 @@ class GameScene extends Phaser.Scene {
       3870, 4200                            // patrol bounds (inside the platform edges)
     );
     // Portal — at the far end of section 6 (tiles 47-51)
-    this.portal = this.createPortal(4750, groundTop - 48 * SCALE / 2);
+    // portal.png is 32×32 px; at SCALE=3 → 96×96 display, centre at groundTop-48
+    this.portal = this.createPortal(4750, groundTop - 32 * SCALE / 2);
 
     this.spikes = this.physics.add.staticGroup();
     this.buildSpikes(floorY);
