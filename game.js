@@ -196,6 +196,7 @@ class GameScene extends Phaser.Scene {
     this.buildHUD();
 
     this.buildDialogBox();
+    this.buildInstructionBoxes();
 
     // ── Dust particle emitter (jump & land bursts) ────────────────
     this.dustEmitter = this.add.particles(0, 0, 'dust', {
@@ -573,6 +574,73 @@ class GameScene extends Phaser.Scene {
   }
 
   // ─────────────────────────────────────────────────────────────────
+  //  Instruction boxes
+  //
+  //  Static world-space panels that float above the ground and
+  //  fade in/out as the player walks into range.
+  //
+  //  Positions chosen so each sign is visible just before the
+  //  player reaches the relevant section:
+  //    1. x=280   → visible from spawn (x=120)
+  //    2. x=880   → visible approaching pit 1  (starts at x=1008)
+  //    3. x=1550  → visible approaching dummy   (at x=1800)
+  //    4. x=2860  → visible approaching chest   (at x=3000)
+  // ─────────────────────────────────────────────────────────────────
+  buildInstructionBoxes() {
+    const groundTop = 768;
+    const boxY      = groundTop - 240;   // float 240px above ground surface
+    const PAD  = 22;                     // inner padding (px)
+    const FONT = 20;                     // world-space font size
+    const LS   = 6;                      // extra line-spacing
+
+    const defs = [
+      { x:  280, lines: ['Use WASD or arrow keys', 'to move'] },
+      { x:  880, lines: ['Press W or ↑ to jump', 'Twice to double jump'] },
+      { x: 1550, lines: ['Press E or , to attack', 'Kill the training dummy'] },
+      { x: 2860, lines: ['Press E or , to', 'open the chest'] },
+    ];
+
+    this._instructionBoxes = defs.map(({ x, lines }) => {
+      // Size the box to the text
+      const lineCount = lines.length;
+      const boxH = lineCount * (FONT + LS) + PAD * 2 - LS;
+      // Longest line determines width (monospace: ~12px per char at 20px font)
+      const longestChars = Math.max(...lines.map(l => l.length));
+      const boxW = longestChars * 12 + PAD * 2;
+
+      const bg = this.add.graphics().setDepth(10).setVisible(false);
+      // Dark navy panel
+      bg.fillStyle(0x1e2340, 0.96);
+      bg.fillRect(-boxW / 2, -boxH / 2, boxW, boxH);
+      // Subtle lighter border
+      bg.lineStyle(2, 0x4a5888, 1);
+      bg.strokeRect(-boxW / 2, -boxH / 2, boxW, boxH);
+      bg.setPosition(x, boxY);
+
+      const txt = this.add.text(x, boxY, lines.join('\n'), {
+        fontSize:   `${FONT}px`,
+        fontFamily: '"Courier New", Courier, monospace',
+        fontStyle:  'bold',
+        color:      '#ffffff',
+        align:      'center',
+        lineSpacing: LS,
+      }).setOrigin(0.5).setDepth(11).setVisible(false);
+
+      // Show when player is roughly 500px before → 700px past the sign
+      return { bg, txt, showMin: x - 500, showMax: x + 700 };
+    });
+  }
+
+  _updateInstructionBoxes() {
+    const px = this.player.sprite.x;
+    this._instructionBoxes.forEach(({ bg, txt, showMin, showMax }) => {
+      const show = px >= showMin && px <= showMax;
+      bg.setVisible(show);
+      txt.setVisible(show);
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────
   //  HUD
   // ─────────────────────────────────────────────────────────────────
   buildHUD() {
@@ -601,6 +669,9 @@ class GameScene extends Phaser.Scene {
   //  Update loop
   // ─────────────────────────────────────────────────────────────────
   update(time, delta) {
+    // Instruction boxes update regardless of dialog state
+    this._updateInstructionBoxes();
+
     // Space advances or closes the dialog box
     if (this._dialog.active) {
       if (Phaser.Input.Keyboard.JustDown(this._spaceKey)) {
