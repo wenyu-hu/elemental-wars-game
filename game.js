@@ -436,11 +436,11 @@ class GameScene extends Phaser.Scene {
   buildDialogBox() {
     const W  = this.scale.width;   // 800
     const H  = this.scale.height;  // 480
-    const BH = 100;                // box height
-    const BX = 20;
-    const BY = H - BH - 10;       // 370 — bottom of screen with gap
-    const BW = W - BX * 2;        // 760
-    const PS = 100;                // portrait square width (= BH so it's square)
+    const BH = 110;                // box height
+    const BX = 0;
+    const BY = H - BH;            // flush to bottom edge
+    const BW = W;                  // full width
+    const PS = 110;                // portrait square width (= BH so it's square)
 
     // Background graphics (redrawn per entry)
     const gfx = this.add.graphics().setScrollFactor(0).setDepth(20).setVisible(false);
@@ -449,18 +449,19 @@ class GameScene extends Phaser.Scene {
     const portrait = this.add.image(0, 0, 'player_idle', 0)
       .setScrollFactor(0).setDepth(22).setVisible(false);
 
-    // Dialogue text
+    // Dialogue text — big, bold, white (Dadish-style readability)
     const txt = this.add.text(0, 0, '', {
-      fontSize: '13px',
-      fontFamily: '"Courier New", Courier, monospace',
-      color: '#111111',
-      wordWrap: { width: BW - PS - 28, useAdvancedWrap: true },
-      lineSpacing: 5,
+      fontSize: '20px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      fontStyle: 'bold',
+      color: '#ffffff',
+      wordWrap: { width: BW - PS - 32, useAdvancedWrap: true },
+      lineSpacing: 6,
     }).setScrollFactor(0).setDepth(22).setVisible(false);
 
-    // "Press SPACE" hint — tiny, bottom-right of the box
-    const hint = this.add.text(BX + BW - 6, BY + BH - 6, '[SPACE]', {
-      fontSize: '10px', fontFamily: 'monospace', color: '#555555',
+    // "Press SPACE" hint — bottom-right corner of the box
+    const hint = this.add.text(BX + BW - 8, BY + BH - 6, '[SPACE]', {
+      fontSize: '11px', fontFamily: 'monospace', color: '#aaaaaa',
     }).setScrollFactor(0).setDepth(22).setOrigin(1, 1).setVisible(false);
 
     // Proximity prompt shown in world space above dummy
@@ -504,22 +505,22 @@ class GameScene extends Phaser.Scene {
       // Black portrait square LEFT
       d.gfx.fillStyle(0x111111, 1);
       d.gfx.fillRect(BX, BY, PS, BH);
-      // Gray text area RIGHT
-      d.gfx.fillStyle(0xd8d4c0, 1);
+      // Dark gray text area RIGHT
+      d.gfx.fillStyle(0x444444, 1);
       d.gfx.fillRect(BX + PS, BY, BW - PS, BH);
 
       // Portrait — player idle sprite, centred in square
       d.portrait.setTexture('player_idle', 0)
-        .setScale(3.5).setFlipX(true)
+        .setScale(4).setFlipX(true)
         .setPosition(BX + PS / 2, BY + BH / 2)
         .setVisible(true);
 
       // Text — right side
       d.txt.setPosition(BX + PS + 14, BY + 14)
-        .setStyle({ wordWrap: { width: BW - PS - 28 } });
+        .setStyle({ wordWrap: { width: BW - PS - 32 } });
     } else {
-      // Gray text area LEFT
-      d.gfx.fillStyle(0xd8d4c0, 1);
+      // Dark gray text area LEFT
+      d.gfx.fillStyle(0x444444, 1);
       d.gfx.fillRect(BX, BY, BW - PS, BH);
       // Black portrait square RIGHT
       d.gfx.fillStyle(0x111111, 1);
@@ -527,7 +528,7 @@ class GameScene extends Phaser.Scene {
 
       // Portrait — dummy sprite, centred in square
       d.portrait.setTexture('dummy', 0)
-        .setScale(3.5).setFlipX(false)
+        .setScale(4).setFlipX(false)
         .setPosition(BX + BW - PS / 2, BY + BH / 2)
         .setVisible(true);
 
