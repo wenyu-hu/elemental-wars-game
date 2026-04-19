@@ -23,6 +23,7 @@ class PreloadScene extends Phaser.Scene {
     this.load.image('dirt',     'assets/dirt.png');
     this.load.image('platform', 'assets/platform.png');
     this.load.image('spike',    'assets/spike.png');
+    this.load.image('portal',   'assets/portal.png');
   }
 
   create() {
@@ -67,6 +68,7 @@ class PreloadScene extends Phaser.Scene {
     makeImg  ('platform',      0x8b5e3c, 32,  6);
     makeImg  ('spike',         0xddddcc,  8,  8);  // 8×8 fallback
     makeImg  ('dust',          0xd4c4a8,  4,  4);
+    makeImg  ('portal',        0x00ddff, 28, 48);   // cyan portal frame
   }
 }
 
@@ -122,7 +124,7 @@ class GameScene extends Phaser.Scene {
   constructor() { super('GameScene'); }
 
   create() {
-    const WORLD_W   = 3600;
+    const WORLD_W   = 5000;
     const WORLD_H   = 1200;
     const floorY    = WORLD_H - 4 * TS;       // grass tile centre  y = 816
     const groundTop = floorY - TS / 2;         // grass surface      y = 768
@@ -133,6 +135,7 @@ class GameScene extends Phaser.Scene {
     this._wasOnGround = true;
     this._squashActive = false;   // true while squash tween is running (prevents re-trigger)
     this._ssTween      = null;    // holds the active squash OR stretch tween reference
+    this._portalReached = false;
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
     this.cameras.main.setBackgroundColor(0xeef8ff);
@@ -142,9 +145,16 @@ class GameScene extends Phaser.Scene {
     this.platforms = this.physics.add.staticGroup();
     this.buildLevel(WORLD_W, WORLD_H, floorY);
 
-    this.player = this.createPlayer(this._respawnX, this._respawnY);
-    this.dummy  = this.createDummy(1800, groundTop - 25 * SCALE / 2);
-    this.chest  = this.createChest(3000, groundTop - 16 * 5 / 2);   // scale=5 used below
+    this.player     = this.createPlayer(this._respawnX, this._respawnY);
+    this.dummy      = this.createDummy(1800, groundTop - 25 * SCALE / 2);
+    this.chest      = this.createChest(3000, groundTop - 16 * 5 / 2);   // scale=5 used below
+    // Patrol section 5: tiles 40-44, x=3840-4224, bordered by pit 4 (3600-3792) + pit 5 (4272-4464)
+    this.patrolDummy = this.createPatrolDummy(
+      4032, groundTop - 25 * SCALE / 2,   // spawn at centre of section 5
+      3870, 4200                            // patrol bounds (inside the platform edges)
+    );
+    // Portal — at the far end of section 6 (tiles 47-51)
+    this.portal = this.createPortal(4750, groundTop - 48 * SCALE / 2);
 
     this.spikes = this.physics.add.staticGroup();
     this.buildSpikes(floorY);
@@ -153,13 +163,20 @@ class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.player.sprite, this.platforms);
     this.physics.add.collider(this.dummy.sprite,  this.platforms);
     this.physics.add.collider(this.chest.sprite,  this.platforms);
+    this.physics.add.collider(this.patrolDummy.sprite, this.platforms);
 
     // Make dummy and chest solid — without these the player passes right through
     this.physics.add.collider(this.player.sprite, this.dummy.sprite);
     this.physics.add.collider(this.player.sprite, this.chest.sprite);
+    // Patrol dummy is solid and can push the player off the platform
+    this.physics.add.collider(this.player.sprite, this.patrolDummy.sprite);
     this.physics.add.overlap(
       this.player.sprite, this.spikes,
       () => this.respawnPlayer(), null, this
+    );
+    this.physics.add.overlap(
+      this.player.sprite, this.portal,
+      () => this.reachPortal(), null, this
     );
 
     // ── Camera ───────────────────────────────────────────────────────
@@ -237,7 +254,11 @@ class GameScene extends Phaser.Scene {
   //    [21-22] PIT 2             x 1968→2160
   //    [23-30] grass section 3   right edge x=2928
   //    [31-32] PIT 3             x 2928→3120
-  //    [33-37] grass section 4
+  //    [33-37] grass section 4   right edge x=3600  (chest/checkpoint)
+  //    [38-39] PIT 4             x 3600→3792
+  //    [40-44] grass section 5   right edge x=4272  (patrol dummy)
+  //    [45-46] PIT 5             x 4272→4464
+  //    [47-51] grass section 6   right edge x=4944  (portal/end)
   // ─────────────────────────────────────────────────────────────────
   buildLevel(worldW, worldH, floorY) {
     const grass = (startX, cols) => {
@@ -254,7 +275,9 @@ class GameScene extends Phaser.Scene {
     grass(0,        11);   // tiles  0-10
     grass(13 * TS,   8);   // tiles 13-20
     grass(23 * TS,   8);   // tiles 23-30
-    grass(33 * TS,   5);   // tiles 33-37
+    grass(33 * TS,   5);   // tiles 33-37  (chest/checkpoint)
+    grass(40 * TS,   5);   // tiles 40-44  (patrol dummy section)
+    grass(47 * TS,   5);   // tiles 47-51  (portal/end)
 
     const totalCols = Math.ceil(worldW / TS) + 1;
     for (let row = 1; row <= 4; row++) dirtRow(floorY + row * TS, totalCols);
@@ -276,6 +299,8 @@ class GameScene extends Phaser.Scene {
   //    Pit 1: 1008 – 1200  (192px → 8 spikes)
   //    Pit 2: 1968 – 2160  (192px → 8 spikes)
   //    Pit 3: 2928 – 3120  (192px → 8 spikes)
+  //    Pit 4: 3600 – 3792  (192px → 8 spikes)  borders patrol section left
+  //    Pit 5: 4272 – 4464  (192px → 8 spikes)  borders patrol section right
   // ─────────────────────────────────────────────────────────────────
   buildSpikes(floorY) {
     const SW = 8 * SCALE;                    // spike display width  = 24
@@ -287,6 +312,8 @@ class GameScene extends Phaser.Scene {
       [10 * TS + TS / 2, 13 * TS - TS / 2],  // 1008 → 1200
       [20 * TS + TS / 2, 23 * TS - TS / 2],  // 1968 → 2160
       [30 * TS + TS / 2, 33 * TS - TS / 2],  // 2928 → 3120
+      [37 * TS + TS / 2, 40 * TS - TS / 2],  // 3600 → 3792  (pit 4, left of patrol)
+      [44 * TS + TS / 2, 47 * TS - TS / 2],  // 4272 → 4464  (pit 5, right of patrol)
     ];
 
     pitEdges.forEach(([left, right]) => {
@@ -663,6 +690,12 @@ class GameScene extends Phaser.Scene {
       color:'#ff5722', stroke:'#ffffff', strokeThickness:6,
       backgroundColor:'#ffffffcc', padding:{x:24,y:14}
     }).setOrigin(0.5).setScrollFactor(0).setVisible(false).setDepth(10);
+
+    this.checkpointText = this.add.text(width/2, height/2 - 60, '✓  Checkpoint!', {
+      fontSize:'24px', fontFamily:'"Arial Black", Arial, sans-serif',
+      color:'#ffffff', stroke:'#2d6a4f', strokeThickness:5,
+      backgroundColor:'#2d6a4fdd', padding:{x:18,y:10}
+    }).setOrigin(0.5).setScrollFactor(0).setVisible(false).setDepth(10);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -683,6 +716,7 @@ class GameScene extends Phaser.Scene {
 
     this.updatePlayer(delta);
     this.updateDummyBar();
+    this.updatePatrolDummy();
     this._checkDummyProximity();
   }
 
@@ -796,12 +830,73 @@ class GameScene extends Phaser.Scene {
     if (c.opened) return;
     c.opened = true;
     c.sprite.anims.play('chest_open', true);
-    this.tweens.add({ targets:c.sprite, scaleX:SCALE*1.2, scaleY:SCALE*1.2,
+    this.tweens.add({ targets:c.sprite, scaleX:5*1.15, scaleY:5*1.15,
       duration:120, yoyo:true, repeat:2 });
-    this.time.delayedCall(400, () => {
-      this.victoryText.setVisible(true);
-      this.time.delayedCall(2500, () => this.scene.start('MenuScene'));
+    // Update respawn checkpoint to just left of the chest
+    this._respawnX = c.sprite.x - 80;
+    this._respawnY = c.sprite.y - 30;
+    // Brief "Checkpoint!" banner
+    this.checkpointText.setVisible(true);
+    this.time.delayedCall(1800, () => this.checkpointText.setVisible(false));
+  }
+
+  reachPortal() {
+    if (this._portalReached) return;
+    this._portalReached = true;
+    this.victoryText.setVisible(true);
+    this.time.delayedCall(2500, () => this.scene.start('MenuScene'));
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  //  Patrol dummy
+  //
+  //  Lives on section 5 (tiles 40-44, x=3840-4224), bordered by
+  //  spike pits on both sides.  Speed = 1.2× player (240 px/s).
+  //  setImmovable keeps its velocity unchanged by collisions so it
+  //  physically shoves the player sideways — potentially off the edge.
+  //  Tilts ±5° to show which way it's walking.
+  // ─────────────────────────────────────────────────────────────────
+  createPatrolDummy(x, y, leftBound, rightBound) {
+    const sprite = this.physics.add.sprite(x, y, 'dummy').setScale(SCALE);
+    sprite.body.setSize(23, 23).setOffset(2, 1);
+    sprite.body.setImmovable(true);   // won't be knocked back by player
+    // Gravity ON so it naturally rests on the ground tiles
+    sprite.body.setAllowGravity(true);
+    sprite.anims.play('dummy_idle', true);
+    // Start moving right
+    sprite.body.setVelocityX(240);
+    sprite.setAngle(5);               // 5° CW = leaning right
+    return { sprite, leftBound, rightBound, dir: 1 };
+  }
+
+  updatePatrolDummy() {
+    const pd = this.patrolDummy;
+    if (!pd) return;
+    const { sprite, leftBound, rightBound } = pd;
+    if (pd.dir === 1 && sprite.x >= rightBound) {
+      pd.dir = -1;
+      sprite.body.setVelocityX(-240);
+      sprite.setAngle(-5);    // -5° CCW = leaning left
+    } else if (pd.dir === -1 && sprite.x <= leftBound) {
+      pd.dir = 1;
+      sprite.body.setVelocityX(240);
+      sprite.setAngle(5);     // 5° CW = leaning right
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  //  Portal — end-of-level trigger
+  // ─────────────────────────────────────────────────────────────────
+  createPortal(x, y) {
+    const sprite = this.physics.add.image(x, y, 'portal').setScale(SCALE);
+    sprite.body.setImmovable(true).setAllowGravity(false);
+    // Gently bob up and down for visual feedback
+    this.tweens.add({
+      targets: sprite,
+      y: y - 12,
+      duration: 1000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
     });
+    return sprite;
   }
 }
 
