@@ -151,7 +151,7 @@ class GameScene extends Phaser.Scene {
     // Patrol section 5: tiles 40-44, x=3840-4224, bordered by pit 4 (3600-3792) + pit 5 (4272-4464)
     this.patrolDummy = this.createPatrolDummy(
       4032, groundTop - 25 * SCALE / 2,   // spawn at centre of section 5
-      3840, 4224                            // bounds = tile centres of first/last tile
+      3830, 4250                            // hard-clamp limits (see updatePatrolDummy)
     );
     // Portal — at the far end of section 6 (tiles 47-51)
     // portal.png is 32×32 px; at SCALE=3 → 96×96 display, centre at groundTop-48
@@ -877,7 +877,19 @@ class GameScene extends Phaser.Scene {
     const db = sprite.body;
     const pb = this.player.sprite.body;
 
-    // Reverse at patrol boundaries
+    // ── Hard position clamp ───────────────────────────────────────
+    // Without this, a player collision can impulse the dummy past the
+    // platform edge and into a spike pit where it sits forever.
+    // leftBound=3830 → dummy body-left ≈ 3795, first tile covers 3792+  ✓
+    // rightBound=4250 → dummy body-right ≈ 4285, past pit lip (4272)    ✓
+    //   so the player body (width 42) is FULLY over the pit before the
+    //   dummy turns, guaranteeing they fall in.
+    if (sprite.x < leftBound || sprite.x > rightBound) {
+      sprite.x = Phaser.Math.Clamp(sprite.x, leftBound, rightBound);
+      db.reset(sprite.x, sprite.y);   // sync body; also zeroes velocity (re-set below)
+    }
+
+    // Direction flip at the same limits
     if (pd.dir === 1 && sprite.x >= rightBound) {
       pd.dir = -1;
       sprite.setAngle(-5);
@@ -886,21 +898,19 @@ class GameScene extends Phaser.Scene {
       sprite.setAngle(5);
     }
 
-    // Re-assert velocity every frame so player bumps can't stop the patrol
+    // Re-assert velocity every frame (body.reset zeroes it; also prevents
+    // player collision impulses from permanently changing patrol speed)
     db.setVelocityX(pd.dir * speed);
 
     // ── Bulldozer push ────────────────────────────────────────────
-    // Arcade physics elastic collision gives the player a one-off
-    // impulse and then they travel at the same speed as the dummy,
-    // so the dummy never presses again.  Instead, every frame that
-    // the dummy body is physically touching something on the side it's
-    // travelling toward (i.e. the player), slam the player's velocity
-    // in that direction faster than they can walk back.
+    // Elastic collision gives a one-off impulse then player and dummy
+    // travel at the same speed — no more contact.  Override the player's
+    // velocity every frame the dummy is physically pressing against them.
     const pressing =
       (pd.dir ===  1 && db.touching.right) ||
       (pd.dir === -1 && db.touching.left);
     if (pressing) {
-      pb.setVelocityX(pd.dir * (speed + 140));  // 380 px/s — overpowers walk input
+      pb.setVelocityX(pd.dir * (speed + 140));  // 380 px/s > walk speed (200)
     }
   }
 
