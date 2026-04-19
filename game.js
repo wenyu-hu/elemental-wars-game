@@ -186,12 +186,16 @@ class GameScene extends Phaser.Scene {
       comma: Phaser.Input.Keyboard.KeyCodes.COMMA,
     });
     this._jumpHeld = false;
+    this._spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this._dummyDialogTriggered = false;
 
     this.buildAnims();
     this.player.sprite.anims.play('idle', true);
     this.dummy.sprite.anims.play('dummy_idle', true);
     this.chest.sprite.anims.play('chest_closed', true);
     this.buildHUD();
+
+    this.buildDialogBox();
 
     // ── Dust particle emitter (jump & land bursts) ────────────────
     this.dustEmitter = this.add.particles(0, 0, 'dust', {
@@ -420,6 +424,154 @@ class GameScene extends Phaser.Scene {
   }
 
   // ─────────────────────────────────────────────────────────────────
+  //  Dialog system
+  //
+  //  Layout (canvas coords, scrollFactor 0):
+  //    When PLAYER speaks  → portrait square LEFT,  gray text area RIGHT
+  //    When OTHER speaks   → gray text area LEFT,   portrait square RIGHT
+  //
+  //  showDialog(entries) – entries: [{ speaker:'player'|'dummy', text:'...' }, ...]
+  //  Space advances through entries, then closes the box.
+  // ─────────────────────────────────────────────────────────────────
+  buildDialogBox() {
+    const W  = this.scale.width;   // 800
+    const H  = this.scale.height;  // 480
+    const BH = 100;                // box height
+    const BX = 20;
+    const BY = H - BH - 10;       // 370 — bottom of screen with gap
+    const BW = W - BX * 2;        // 760
+    const PS = 100;                // portrait square width (= BH so it's square)
+
+    // Background graphics (redrawn per entry)
+    const gfx = this.add.graphics().setScrollFactor(0).setDepth(20).setVisible(false);
+
+    // Portrait image — reuses existing sprite textures cropped to the square
+    const portrait = this.add.image(0, 0, 'player_idle', 0)
+      .setScrollFactor(0).setDepth(22).setVisible(false);
+
+    // Dialogue text
+    const txt = this.add.text(0, 0, '', {
+      fontSize: '13px',
+      fontFamily: '"Courier New", Courier, monospace',
+      color: '#111111',
+      wordWrap: { width: BW - PS - 28, useAdvancedWrap: true },
+      lineSpacing: 5,
+    }).setScrollFactor(0).setDepth(22).setVisible(false);
+
+    // "Press SPACE" hint — tiny, bottom-right of the box
+    const hint = this.add.text(BX + BW - 6, BY + BH - 6, '[SPACE]', {
+      fontSize: '10px', fontFamily: 'monospace', color: '#555555',
+    }).setScrollFactor(0).setDepth(22).setOrigin(1, 1).setVisible(false);
+
+    // Proximity prompt shown in world space above dummy
+    const prompt = this.add.text(0, 0, '[SPACE]', {
+      fontSize: '11px', fontFamily: 'monospace', color: '#ffffff',
+      backgroundColor: '#000000bb', padding: { x: 5, y: 2 },
+    }).setDepth(15).setOrigin(0.5, 1).setVisible(false);
+
+    this._dialog = { active: false, queue: [], gfx, portrait, txt, hint, prompt,
+                     BX, BY, BW, BH, PS };
+  }
+
+  // entries: [{ speaker: 'player'|'dummy', text: '...' }, ...]
+  showDialog(entries) {
+    this._dialog.queue = entries.slice();
+    this._dialog.active = true;
+    this._dialog.prompt.setVisible(false);
+    this._advanceDialog();
+  }
+
+  _advanceDialog() {
+    const d = this._dialog;
+    if (d.queue.length === 0) { this._closeDialog(); return; }
+    const { speaker, text } = d.queue.shift();
+    this._renderDialogEntry(speaker, text);
+  }
+
+  _renderDialogEntry(speaker, text) {
+    const d = this._dialog;
+    const { BX, BY, BW, BH, PS } = d;
+    const isPlayer = speaker === 'player';
+
+    // ── Draw background panels ─────────────────────────────────────
+    d.gfx.clear().setVisible(true);
+
+    // Outer border/shadow
+    d.gfx.fillStyle(0x222222, 1);
+    d.gfx.fillRect(BX - 3, BY - 3, BW + 6, BH + 6);
+
+    if (isPlayer) {
+      // Black portrait square LEFT
+      d.gfx.fillStyle(0x111111, 1);
+      d.gfx.fillRect(BX, BY, PS, BH);
+      // Gray text area RIGHT
+      d.gfx.fillStyle(0xd8d4c0, 1);
+      d.gfx.fillRect(BX + PS, BY, BW - PS, BH);
+
+      // Portrait — player idle sprite, centred in square
+      d.portrait.setTexture('player_idle', 0)
+        .setScale(3.5).setFlipX(true)
+        .setPosition(BX + PS / 2, BY + BH / 2)
+        .setVisible(true);
+
+      // Text — right side
+      d.txt.setPosition(BX + PS + 14, BY + 14)
+        .setStyle({ wordWrap: { width: BW - PS - 28 } });
+    } else {
+      // Gray text area LEFT
+      d.gfx.fillStyle(0xd8d4c0, 1);
+      d.gfx.fillRect(BX, BY, BW - PS, BH);
+      // Black portrait square RIGHT
+      d.gfx.fillStyle(0x111111, 1);
+      d.gfx.fillRect(BX + BW - PS, BY, PS, BH);
+
+      // Portrait — dummy sprite, centred in square
+      d.portrait.setTexture('dummy', 0)
+        .setScale(3.5).setFlipX(false)
+        .setPosition(BX + BW - PS / 2, BY + BH / 2)
+        .setVisible(true);
+
+      // Text — left side
+      d.txt.setStyle({ wordWrap: { width: BW - PS - 28 } })
+        .setPosition(BX + 14, BY + 14);
+    }
+
+    d.txt.setText(text).setVisible(true);
+    d.hint.setVisible(true);
+  }
+
+  _closeDialog() {
+    const d = this._dialog;
+    d.active = false;
+    d.gfx.clear().setVisible(false);
+    d.portrait.setVisible(false);
+    d.txt.setVisible(false);
+    d.hint.setVisible(false);
+  }
+
+  // Show proximity prompt above dummy head; auto-trigger dialog on first approach
+  _checkDummyProximity() {
+    if (this.dummy.dead || this._dummyDialogTriggered) {
+      this._dialog.prompt.setVisible(false);
+      return;
+    }
+    const dist = Math.abs(this.player.sprite.x - this.dummy.sprite.x);
+    const inRange = dist < 160;
+
+    this._dialog.prompt
+      .setVisible(inRange && !this._dialog.active)
+      .setPosition(this.dummy.sprite.x, this.dummy.sprite.y - 55);
+
+    if (inRange && !this._dialog.active) {
+      this._dummyDialogTriggered = true;
+      this.showDialog([
+        { speaker: 'dummy',  text: 'Hello.' },
+        { speaker: 'player', text: 'Hello to you, too.' },
+      ]);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
   //  HUD
   // ─────────────────────────────────────────────────────────────────
   buildHUD() {
@@ -448,8 +600,18 @@ class GameScene extends Phaser.Scene {
   //  Update loop
   // ─────────────────────────────────────────────────────────────────
   update(time, delta) {
+    // Space advances or closes the dialog box
+    if (this._dialog.active) {
+      if (Phaser.Input.Keyboard.JustDown(this._spaceKey)) {
+        this._advanceDialog();
+      }
+      this.updateDummyBar();
+      return;   // freeze all other input while dialog is open
+    }
+
     this.updatePlayer(delta);
     this.updateDummyBar();
+    this._checkDummyProximity();
   }
 
   updatePlayer(delta) {
