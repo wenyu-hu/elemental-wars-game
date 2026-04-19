@@ -860,29 +860,32 @@ class GameScene extends Phaser.Scene {
   createPatrolDummy(x, y, leftBound, rightBound) {
     const sprite = this.physics.add.sprite(x, y, 'dummy').setScale(SCALE);
     sprite.body.setSize(23, 23).setOffset(2, 1);
-    sprite.body.setImmovable(true);   // won't be knocked back by player
-    // Gravity ON so it naturally rests on the ground tiles
+    // NOTE: do NOT setImmovable — static platforms are also immovable, and
+    // Phaser skips separation entirely when both bodies are immovable, making
+    // the dummy fall through the floor.  We re-assert velocity every frame
+    // instead, so player collisions can't permanently knock it off course.
     sprite.body.setAllowGravity(true);
     sprite.anims.play('dummy_idle', true);
-    // Start moving right
-    sprite.body.setVelocityX(240);
-    sprite.setAngle(5);               // 5° CW = leaning right
-    return { sprite, leftBound, rightBound, dir: 1 };
+    sprite.setAngle(5);   // start leaning right
+    return { sprite, leftBound, rightBound, speed: 240, dir: 1 };
   }
 
   updatePatrolDummy() {
     const pd = this.patrolDummy;
     if (!pd) return;
-    const { sprite, leftBound, rightBound } = pd;
+    const { sprite, leftBound, rightBound, speed } = pd;
+
+    // Reverse at patrol boundaries
     if (pd.dir === 1 && sprite.x >= rightBound) {
       pd.dir = -1;
-      sprite.body.setVelocityX(-240);
-      sprite.setAngle(-5);    // -5° CCW = leaning left
+      sprite.setAngle(-5);
     } else if (pd.dir === -1 && sprite.x <= leftBound) {
       pd.dir = 1;
-      sprite.body.setVelocityX(240);
-      sprite.setAngle(5);     // 5° CW = leaning right
+      sprite.setAngle(5);
     }
+
+    // Re-assert velocity every frame so player bumps can't stop the patrol
+    sprite.body.setVelocityX(pd.dir * speed);
   }
 
   // ─────────────────────────────────────────────────────────────────
