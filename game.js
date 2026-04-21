@@ -908,12 +908,18 @@ class GameScene extends Phaser.Scene {
     db.setVelocityX(pd.dir * speed);
 
     // ── Bulldozer push ────────────────────────────────────────────
-    // Elastic collision gives a one-off impulse then player and dummy
-    // travel at the same speed — no more contact.  Override the player's
-    // velocity every frame the dummy is physically pressing against them.
+    // db.touching.right/left is only set on the exact physics frame a
+    // collision is resolved — if Phaser skips or misses the contact for
+    // one frame the flag is false and the push never fires.  A direct
+    // body-bounds proximity check fires every frame the bodies are close,
+    // regardless of whether the physics step registered a collision.
+    const PUSH_GAP  = 10;   // px tolerance — catches sub-pixel separation
+    const sameLevel = Math.abs(db.center.y - pb.center.y) < TS; // ignore jump-over
     const pressing =
-      (pd.dir ===  1 && db.touching.right) ||
-      (pd.dir === -1 && db.touching.left);
+      sameLevel && (
+        (pd.dir ===  1 && db.right >= pb.left - PUSH_GAP && pb.left > db.left) ||
+        (pd.dir === -1 && db.left  <= pb.right + PUSH_GAP && pb.right < db.right)
+      );
     if (pressing) {
       pb.setVelocityX(pd.dir * (speed + 140));  // 380 px/s > walk speed (200)
     }
