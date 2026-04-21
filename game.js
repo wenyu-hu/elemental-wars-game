@@ -684,6 +684,13 @@ class GameScene extends Phaser.Scene {
     }).setOrigin(0.5, 1);
     this.dummyBar = { bg: barBg, fg: barFg, label: barLabel };
 
+    const pBarBg    = this.add.rectangle(0, 0, 80, 10, 0x220000).setOrigin(0.5, 1);
+    const pBarFg    = this.add.rectangle(0, 0, 80, 10, 0xff3333).setOrigin(0,   1);
+    const pBarLabel = this.add.text(0, 0, '', {
+      fontSize: '9px', fontFamily: 'monospace', color: '#ffbbbb'
+    }).setOrigin(0.5, 1);
+    this.patrolDummyBar = { bg: pBarBg, fg: pBarFg, label: pBarLabel };
+
     const { width, height } = this.scale;
     this.add.text(width/2, 18,
       'Arrow/WASD = move   ↑/W = jump (×2)   ↓/S = duck   E or , = attack',
@@ -792,6 +799,11 @@ class GameScene extends Phaser.Scene {
       const facing = ps.flipX ? ds.x > ps.x : ds.x < ps.x;
       if (Math.abs(ps.x-ds.x) < reach && Math.abs(ps.y-ds.y) < TS && facing) this.hitDummy();
     }
+    if (this.patrolDummy && !this.patrolDummy.dead) {
+      const ds = this.patrolDummy.sprite;
+      const facing = ps.flipX ? ds.x > ps.x : ds.x < ps.x;
+      if (Math.abs(ps.x-ds.x) < reach && Math.abs(ps.y-ds.y) < TS && facing) this.hitPatrolDummy();
+    }
     if (this.chest && !this.chest.opened) {
       const cs = this.chest.sprite;
       const facing = ps.flipX ? cs.x > ps.x : cs.x < ps.x;
@@ -822,13 +834,45 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  hitPatrolDummy() {
+    const d = this.patrolDummy;
+    d.hp = Math.max(0, d.hp - 1);
+    if (d.hp <= 0) {
+      d.dead = true;
+      d.sprite.anims.play('dummy_hit', true);
+      this.time.delayedCall(150, () => {
+        d.sprite.setTint(0x550000);
+        this.tweens.add({ targets: d.sprite, angle: 90, alpha: 0, duration: 400, ease: 'Power2',
+          onComplete: () => d.sprite.destroy() });
+        this.patrolDummyBar.bg.setVisible(false);
+        this.patrolDummyBar.fg.setVisible(false);
+        this.patrolDummyBar.label.setVisible(false);
+      });
+    } else {
+      d.sprite.anims.play('dummy_hit', true);
+      d.sprite.setTintFill(0xffffff);
+      this.time.delayedCall(100, () => {
+        if (!d.dead) { d.sprite.clearTint(); d.sprite.anims.play('dummy_idle', true); }
+      });
+    }
+  }
+
   updateDummyBar() {
-    if (this.dummy.dead) return;
-    const ds = this.dummy.sprite, bar = this.dummyBar, barW = 80;
-    const bx = ds.x, by = ds.y - 25*SCALE/2 - 8;
-    bar.bg.setPosition(bx, by).setSize(barW, 10);
-    bar.fg.setPosition(bx - barW/2, by).setSize(barW * this.dummy.hp / this.dummy.maxHp, 10);
-    bar.label.setPosition(bx, by-10).setText(`HP: ${this.dummy.hp} / ${this.dummy.maxHp}`);
+    if (!this.dummy.dead) {
+      const ds = this.dummy.sprite, bar = this.dummyBar, barW = 80;
+      const bx = ds.x, by = ds.y - 25*SCALE/2 - 8;
+      bar.bg.setPosition(bx, by).setSize(barW, 10);
+      bar.fg.setPosition(bx - barW/2, by).setSize(barW * this.dummy.hp / this.dummy.maxHp, 10);
+      bar.label.setPosition(bx, by-10).setText(`HP: ${this.dummy.hp} / ${this.dummy.maxHp}`);
+    }
+    const pd = this.patrolDummy;
+    if (pd && !pd.dead && pd.sprite?.active) {
+      const ds = pd.sprite, bar = this.patrolDummyBar, barW = 80;
+      const bx = ds.x, by = ds.y - 25*SCALE/2 - 8;
+      bar.bg.setPosition(bx, by).setSize(barW, 10);
+      bar.fg.setPosition(bx - barW/2, by).setSize(barW * pd.hp / pd.maxHp, 10);
+      bar.label.setPosition(bx, by-10).setText(`HP: ${pd.hp} / ${pd.maxHp}`);
+    }
   }
 
   openChest() {
@@ -872,12 +916,13 @@ class GameScene extends Phaser.Scene {
     sprite.body.setAllowGravity(true);
     sprite.anims.play('dummy_idle', true);
     sprite.setAngle(5);   // start leaning right
-    return { sprite, leftBound, rightBound, speed: 240, dir: 1 };
+    const maxHp = 5;
+    return { sprite, leftBound, rightBound, speed: 240, dir: 1, hp: maxHp, maxHp, dead: false };
   }
 
   updatePatrolDummy() {
     const pd = this.patrolDummy;
-    if (!pd) return;
+    if (!pd || pd.dead) return;
     const { sprite, leftBound, rightBound, speed } = pd;
     const db = sprite.body;
     const pb = this.player.sprite.body;
