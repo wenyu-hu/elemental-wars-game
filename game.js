@@ -505,6 +505,11 @@ class GameScene extends Phaser.Scene {
 
   // entries: [{ speaker: 'player'|'dummy', text: '...' }, ...]
   showDialog(entries) {
+    // Freeze the player in place so they don't drift during the dialog.
+    // updatePlayer is suspended while dialog.active, so without this the
+    // velocity from the triggering frame persists for the whole conversation.
+    this.player.sprite.body.setVelocityX(0);
+
     this._dialog.queue = entries.slice();
     this._dialog.active = true;
     this._dialog.prompt.setVisible(false);
@@ -703,8 +708,9 @@ class GameScene extends Phaser.Scene {
   //  Update loop
   // ─────────────────────────────────────────────────────────────────
   update(time, delta) {
-    // Instruction boxes update regardless of dialog state
+    // These always run — even during dialog
     this._updateInstructionBoxes();
+    this.updatePatrolDummy();   // must never pause: dummy roams off-platform if skipped
 
     // Space advances or closes the dialog box
     if (this._dialog.active) {
@@ -712,12 +718,11 @@ class GameScene extends Phaser.Scene {
         this._advanceDialog();
       }
       this.updateDummyBar();
-      return;   // freeze all other input while dialog is open
+      return;   // freeze player input while dialog is open
     }
 
     this.updatePlayer(delta);
     this.updateDummyBar();
-    this.updatePatrolDummy();
     this._checkDummyProximity();
   }
 
