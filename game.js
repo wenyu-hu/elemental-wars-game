@@ -189,8 +189,10 @@ class GameScene extends Phaser.Scene {
     // x=5520 = centre of pit (5424-5616), y=688 = groundTop-80 (1 tile up).
     // Not visible from the portal (pit left edge 5424 is off-screen at zoom 0.65).
     this._starOrigY  = groundTop - 80;   // 688
-    this._starSprite = this.physics.add.image(5520, this._starOrigY, 'star')
-      .setScale(SCALE).setAllowGravity(false).setDepth(10);
+    this._starSprite = this.physics.add.image(5520, this._starOrigY, 'star');
+    this._starSprite.setScale(SCALE);
+    this._starSprite.setDepth(10);
+    this._starSprite.body.setAllowGravity(false);
     this._startStarBob();
     this.physics.add.overlap(
       this.player.sprite, this._starSprite,
@@ -1106,6 +1108,11 @@ class MapScene extends Phaser.Scene {
     back.on('pointerover', () => back.setAlpha(0.75));
     back.on('pointerout',  () => back.setAlpha(1.00));
     back.on('pointerdown', () => this.scene.start('MenuScene'));
+
+    // ── Keyboard fallback: press 1 or ENTER to start Level 1 ──────
+    this.input.keyboard.once('keydown-ONE',   () => this.scene.start('GameScene'));
+    this.input.keyboard.once('keydown-ENTER', () => this.scene.start('GameScene'));
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
   }
 
   // ── Helpers ───────────────────────────────────────────────────────
@@ -1155,7 +1162,15 @@ class MapScene extends Phaser.Scene {
         this.tweens.add({ targets: [gfx, lbl], scaleX: 1.12, scaleY: 1.12, duration: 110, ease: 'Back.easeOut' }));
       lbl.on('pointerout', () =>
         this.tweens.add({ targets: [gfx, lbl], scaleX: 1, scaleY: 1, duration: 110 }));
-      lbl.on('pointerdown', () => this.scene.start('GameScene'));
+      // pointerup (not pointerdown) matches MenuScene PLAY button pattern which works
+      lbl.on('pointerup', () => {
+        console.log('[MapScene] Level', n, 'clicked → starting GameScene');
+        try {
+          this.scene.start('GameScene');
+        } catch (e) {
+          console.error('[MapScene] scene.start threw:', e);
+        }
+      });
 
     } else {
       // Locked — gray node, no interaction
