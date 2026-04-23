@@ -24,6 +24,7 @@ class PreloadScene extends Phaser.Scene {
     this.load.image('platform', 'assets/platform.png');
     this.load.image('spike',    'assets/spike.png');
     this.load.image('portal',   'assets/portal.png');
+    this.load.image('star',     'assets/star.png');
   }
 
   create() {
@@ -69,6 +70,7 @@ class PreloadScene extends Phaser.Scene {
     makeImg  ('spike',         0xddddcc,  8,  8);  // 8×8 fallback
     makeImg  ('dust',          0xd4c4a8,  4,  4);
     makeImg  ('portal',        0x00ddff, 32, 32);   // portal fallback
+    makeImg  ('star',          0xf5c518, 14, 14);  // star fallback
   }
 }
 
@@ -124,7 +126,7 @@ class GameScene extends Phaser.Scene {
   constructor() { super('GameScene'); }
 
   create() {
-    const WORLD_W   = 5000;
+    const WORLD_W   = 5800;
     const WORLD_H   = 1200;
     const floorY    = WORLD_H - 4 * TS;       // grass tile centre  y = 816
     const groundTop = floorY - TS / 2;         // grass surface      y = 768
@@ -136,6 +138,8 @@ class GameScene extends Phaser.Scene {
     this._squashActive = false;   // true while squash tween is running (prevents re-trigger)
     this._ssTween      = null;    // holds the active squash OR stretch tween reference
     this._portalReached = false;
+    this._gotStar       = false;   // temp flag — cleared on death, saved on portal
+    this._starBobTween  = null;
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
     this.cameras.main.setBackgroundColor(0xeef8ff);
@@ -178,6 +182,19 @@ class GameScene extends Phaser.Scene {
     this.physics.add.overlap(
       this.player.sprite, this.portal,
       () => this.reachPortal(), null, this
+    );
+
+    // ── Secret star ───────────────────────────────────────────────────
+    // Floats above the hidden spike pit after the portal.
+    // x=5520 = centre of pit (5424-5616), y=688 = groundTop-80 (1 tile up).
+    // Not visible from the portal (pit left edge 5424 is off-screen at zoom 0.65).
+    this._starOrigY  = groundTop - 80;   // 688
+    this._starSprite = this.physics.add.image(5520, this._starOrigY, 'star')
+      .setScale(SCALE).setAllowGravity(false).setDepth(10);
+    this._startStarBob();
+    this.physics.add.overlap(
+      this.player.sprite, this._starSprite,
+      () => this.collectStar(), null, this
     );
 
     // ── Camera ───────────────────────────────────────────────────────
@@ -279,6 +296,7 @@ class GameScene extends Phaser.Scene {
     grass(33 * TS,   5);   // tiles 33-37  (chest/checkpoint)
     grass(40 * TS,   5);   // tiles 40-44  (patrol dummy section)
     grass(47 * TS,   5);   // tiles 47-51  (portal/end)
+    grass(52 * TS,   5);   // tiles 52-56  (secret area — leads to star pit)
 
     const totalCols = Math.ceil(worldW / TS) + 1;
     for (let row = 1; row <= 4; row++) dirtRow(floorY + row * TS, totalCols);
@@ -315,6 +333,7 @@ class GameScene extends Phaser.Scene {
       [30 * TS + TS / 2, 33 * TS - TS / 2],  // 2928 → 3120
       [37 * TS + TS / 2, 40 * TS - TS / 2],  // 3600 → 3792  (pit 4, left of patrol)
       [44 * TS + TS / 2, 47 * TS - TS / 2],  // 4272 → 4464  (pit 5, right of patrol)
+      [56 * TS + TS / 2, 56 * TS + TS / 2 + 192], // 5424 → 5616  (secret star pit)
     ];
 
     pitEdges.forEach(([left, right]) => {
@@ -400,6 +419,14 @@ class GameScene extends Phaser.Scene {
       p.sprite.body.setVelocity(0, 0);
       p.jumpsLeft = 2;
       this._wasOnGround = true;   // prevent phantom land-squash on respawn
+
+      // Star is lost on death — restore it so the player can try again
+      if (this._gotStar) {
+        this._gotStar = false;
+        this._starSprite.setVisible(true).setScale(SCALE);
+        this._starSprite.body.enable = true;
+        this._startStarBob();
+      }
 
       this.tweens.add({
         targets: p.sprite, alpha: 0.35,
@@ -894,8 +921,35 @@ class GameScene extends Phaser.Scene {
     if (this._portalReached) return;
     this._portalReached = true;
     this.registry.set('level1Complete', true);
+    if (this._gotStar) this.registry.set('level1Star', true);  // only saved now
     this.victoryText.setVisible(true);
     this.time.delayedCall(2500, () => this.scene.start('MapScene'));
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  //  Secret star
+  // ─────────────────────────────────────────────────────────────────
+  _startStarBob() {
+    if (this._starBobTween) this._starBobTween.stop();
+    this._starSprite.y = this._starOrigY;
+    this._starBobTween = this.tweens.add({
+      targets: this._starSprite,
+      y: this._starOrigY - 10,
+      duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+    });
+  }
+
+  collectStar() {
+    if (this._gotStar || !this._starSprite.visible) return;
+    this._gotStar = true;
+    if (this._starBobTween) { this._starBobTween.stop(); this._starBobTween = null; }
+    this._starSprite.body.enable = false;
+    this.tweens.add({
+      targets: this._starSprite,
+      scaleX: SCALE * 2, scaleY: SCALE * 2, alpha: 0,
+      duration: 350, ease: 'Sine.easeOut',
+      onComplete: () => this._starSprite.setVisible(false).setAlpha(1).setScale(SCALE),
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────
