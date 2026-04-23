@@ -1147,15 +1147,19 @@ class MapScene extends Phaser.Scene {
         color: done ? '#7a5000' : '#2c5aa0',
       }).setOrigin(0.5));
 
-      // Hover / click (use container hit area)
-      con.setSize(R * 2, R * 2).setInteractive({ useHandCursor: true });
-      con.on('pointerover', () =>
+      // Hover / click — use a plain Zone for reliable hit detection.
+      // container.setInteractive() can mis-size its area and swallow all
+      // subsequent input; a Zone at world coords avoids that entirely.
+      const zone = this.add.zone(x, y, R * 2, R * 2)
+        .setInteractive({ useHandCursor: true });
+      zone.on('pointerover', () =>
         this.tweens.add({ targets: con, scaleX: 1.12, scaleY: 1.12, duration: 110, ease: 'Back.easeOut' }));
-      con.on('pointerout', () =>
+      zone.on('pointerout', () =>
         this.tweens.add({ targets: con, scaleX: 1, scaleY: 1, duration: 110 }));
-      con.on('pointerdown', () =>
-        this.tweens.add({ targets: con, scaleX: 0.9, scaleY: 0.9, duration: 80, yoyo: true,
-          onComplete: () => this.scene.start('GameScene') }));
+      zone.on('pointerdown', () => {
+        this.tweens.add({ targets: con, scaleX: 0.9, scaleY: 0.9, duration: 80, yoyo: true });
+        this.time.delayedCall(160, () => this.scene.start('GameScene'));
+      });
 
     } else {
       // Locked ─ gray node
