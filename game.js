@@ -1130,63 +1130,51 @@ class MapScene extends Phaser.Scene {
   _node(x, y, n, unlocked, done, hasStar) {
     const R = 33;
 
-    // Draw everything in world-space so no container transforms interfere.
-    const gfx = this.add.graphics();
-
     if (unlocked) {
-      // Drop shadow
-      gfx.fillStyle(0x000000, 0.18).fillCircle(x + 4, y + 6, R);
-      // Fill + border
-      gfx.fillStyle(done ? 0xf5c518 : 0xffffff, 1).fillCircle(x, y, R);
-      gfx.lineStyle(5, done ? 0xd4a800 : 0x5b8dd9, 1).strokeCircle(x, y, R);
+      // Graphics positioned AT (x,y) so scale tweens pivot from the circle centre
+      const gfx = this.add.graphics({ x, y });
+      gfx.fillStyle(0x000000, 0.18).fillCircle(4, 6, R);               // shadow
+      gfx.fillStyle(done ? 0xf5c518 : 0xffffff, 1).fillCircle(0, 0, R); // fill
+      gfx.lineStyle(5, done ? 0xd4a800 : 0x5b8dd9, 1).strokeCircle(0, 0, R); // border
 
-      // Level number (separate text object at world coords)
       const lbl = this.add.text(x, y, `${n}`, {
         fontSize: '28px', fontFamily: '"Arial Black", Arial, sans-serif',
         color: done ? '#7a5000' : '#2c5aa0',
       }).setOrigin(0.5);
 
-      // Make the graphics itself the hit area — circle geom at world pos
-      gfx.setInteractive(
-        new Phaser.Geom.Circle(x, y, R),
-        Phaser.Geom.Circle.Contains
-      );
-      this.input.setDefaultCursor('default');
-      gfx.on('pointerover', () => {
-        this.input.setDefaultCursor('pointer');
-        this.tweens.add({ targets: [gfx, lbl], scaleX: 1.12, scaleY: 1.12, duration: 110, ease: 'Back.easeOut' });
-      });
-      gfx.on('pointerout', () => {
-        this.input.setDefaultCursor('default');
-        this.tweens.add({ targets: [gfx, lbl], scaleX: 1, scaleY: 1, duration: 110 });
-      });
-      gfx.on('pointerup', () => {
-        this.scene.start('GameScene');
-      });
+      // Arc Shape has native circle hit-testing — most reliable approach in Phaser 3.
+      // alpha:0 keeps it invisible; input still fires normally.
+      const hit = this.add.circle(x, y, R, 0xffffff, 0)
+        .setInteractive({ useHandCursor: true });
+
+      hit.on('pointerover', () =>
+        this.tweens.add({ targets: [gfx, lbl], scaleX: 1.12, scaleY: 1.12, duration: 110, ease: 'Back.easeOut' }));
+      hit.on('pointerout', () =>
+        this.tweens.add({ targets: [gfx, lbl], scaleX: 1, scaleY: 1, duration: 110 }));
+      // delayedCall defers scene.start out of the input-event frame (avoids edge-case stalls)
+      hit.on('pointerdown', () =>
+        this.time.delayedCall(1, () => this.scene.start('GameScene')));
 
     } else {
       // Locked — gray node, no interaction
-      gfx.fillStyle(0x000000, 0.15).fillCircle(x + 4, y + 6, R);
-      gfx.fillStyle(0xaaaaaa, 1).fillCircle(x, y, R);
-      gfx.lineStyle(5, 0x888888, 1).strokeCircle(x, y, R);
-
-      // Padlock body (white rectangle)
-      gfx.fillStyle(0xffffff, 0.65).fillRoundedRect(x - 11, y - 4, 22, 18, 4);
-      // Padlock shackle (arc drawn via strokeCircle trick using lineStyle)
-      const lg = this.add.graphics();
-      lg.lineStyle(5, 0xffffff, 0.65);
-      lg.beginPath();
-      lg.arc(x, y - 4, 10, Math.PI, 0, false);
-      lg.strokePath();
+      const gfx = this.add.graphics({ x, y });
+      gfx.fillStyle(0x000000, 0.15).fillCircle(4, 6, R);
+      gfx.fillStyle(0xaaaaaa, 1).fillCircle(0, 0, R);
+      gfx.lineStyle(5, 0x888888, 1).strokeCircle(0, 0, R);
+      // Padlock body
+      gfx.fillStyle(0xffffff, 0.65).fillRoundedRect(-11, -4, 22, 18, 4);
+      // Padlock shackle
+      gfx.lineStyle(5, 0xffffff, 0.65);
+      gfx.beginPath(); gfx.arc(0, -4, 10, Math.PI, 0, false); gfx.strokePath();
     }
 
-    // Star indicator below the circle (gold if collected, gray outline if not)
-    const sg  = this.add.graphics();
-    const sy  = y + R + 18;
+    // Star indicator below the circle (gold if earned, gray outline if not)
+    const sg  = this.add.graphics({ x, y });
+    const sy  = R + 18;   // relative to gfx origin (x,y)
     const pts = Array.from({ length: 10 }, (_, i) => {
       const angle = (i * Math.PI / 5) - Math.PI / 2;
       const r     = i % 2 === 0 ? 10 : 4;
-      return new Phaser.Math.Vector2(x + Math.cos(angle) * r, sy + Math.sin(angle) * r);
+      return new Phaser.Math.Vector2(Math.cos(angle) * r, sy + Math.sin(angle) * r);
     });
     if (hasStar) { sg.fillStyle(0xf5c518, 1).fillPoints(pts, true); }
     sg.lineStyle(2, hasStar ? 0xd4a800 : 0xaaaaaa, 1).strokePoints(pts, true);
