@@ -1137,23 +1137,25 @@ class MapScene extends Phaser.Scene {
       gfx.fillStyle(done ? 0xf5c518 : 0xffffff, 1).fillCircle(0, 0, R); // fill
       gfx.lineStyle(5, done ? 0xd4a800 : 0x5b8dd9, 1).strokeCircle(0, 0, R); // border
 
+      // Text label — made interactive with a rect hit area covering the whole circle.
+      // Same technique as the working back button; avoids Arc/Zone/Container issues.
       const lbl = this.add.text(x, y, `${n}`, {
         fontSize: '28px', fontFamily: '"Arial Black", Arial, sans-serif',
         color: done ? '#7a5000' : '#2c5aa0',
       }).setOrigin(0.5);
 
-      // Arc Shape has native circle hit-testing — most reliable approach in Phaser 3.
-      // alpha:0 keeps it invisible; input still fires normally.
-      const hit = this.add.circle(x, y, R, 0xffffff, 0)
-        .setInteractive({ useHandCursor: true });
+      // Hit area is a 2R×2R rectangle centred at the text's local origin (0,0)
+      lbl.setInteractive(
+        new Phaser.Geom.Rectangle(-R, -R, R * 2, R * 2),
+        Phaser.Geom.Rectangle.Contains
+      );
+      lbl.input.cursor = 'pointer';
 
-      hit.on('pointerover', () =>
+      lbl.on('pointerover', () =>
         this.tweens.add({ targets: [gfx, lbl], scaleX: 1.12, scaleY: 1.12, duration: 110, ease: 'Back.easeOut' }));
-      hit.on('pointerout', () =>
+      lbl.on('pointerout', () =>
         this.tweens.add({ targets: [gfx, lbl], scaleX: 1, scaleY: 1, duration: 110 }));
-      // delayedCall defers scene.start out of the input-event frame (avoids edge-case stalls)
-      hit.on('pointerdown', () =>
-        this.time.delayedCall(1, () => this.scene.start('GameScene')));
+      lbl.on('pointerdown', () => this.scene.start('GameScene'));
 
     } else {
       // Locked — gray node, no interaction
