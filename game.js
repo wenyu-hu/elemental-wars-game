@@ -108,9 +108,9 @@ class MenuScene extends Phaser.Scene {
 
     btn.on('pointerover', () => btn.setStyle({ backgroundColor: '#e64a19' }));
     btn.on('pointerout',  () => btn.setStyle({ backgroundColor: '#ff5722' }));
-    btn.on('pointerup',   () => this.scene.start('GameScene'));
-    this.input.keyboard.once('keydown-ENTER', () => this.scene.start('GameScene'));
-    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+    btn.on('pointerup',   () => this.scene.start('MapScene'));
+    this.input.keyboard.once('keydown-ENTER', () => this.scene.start('MapScene'));
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('MapScene'));
 
     this.add.text(width/2, height-24,
       'Arrow keys / WASD  ·  ↑/W = jump (×2)  ·  ↓/S = duck  ·  E or , = attack',
@@ -893,8 +893,9 @@ class GameScene extends Phaser.Scene {
   reachPortal() {
     if (this._portalReached) return;
     this._portalReached = true;
+    this.registry.set('level1Complete', true);
     this.victoryText.setVisible(true);
-    this.time.delayedCall(2500, () => this.scene.start('MenuScene'));
+    this.time.delayedCall(2500, () => this.scene.start('MapScene'));
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -987,6 +988,149 @@ class GameScene extends Phaser.Scene {
 }
 
 // ── Boot ─────────────────────────────────────
+// ── MapScene ─────────────────────────────────────────────────────────────────
+class MapScene extends Phaser.Scene {
+  constructor() { super('MapScene'); }
+
+  create() {
+    const W = this.scale.width;   // 800
+    const H = this.scale.height;  // 480
+
+    // ── Background ────────────────────────────────────────────────
+    this.add.rectangle(0, 0, W, H, 0xb8dff8).setOrigin(0);      // sky
+    this.add.rectangle(0, H * 0.70, W, H * 0.30, 0x7ab648).setOrigin(0); // grass
+    this.add.rectangle(0, H * 0.70, W, 10, 0x52a84f).setOrigin(0);       // grass edge
+
+    // Clouds
+    [[130, 62, 1.0], [420, 44, 0.72], [690, 70, 0.88]].forEach(([cx, cy, s]) => {
+      const g = this.add.graphics().fillStyle(0xffffff, 0.88);
+      g.fillEllipse(cx,        cy,        72*s, 36*s);
+      g.fillEllipse(cx - 26*s, cy + 8*s,  46*s, 28*s);
+      g.fillEllipse(cx + 26*s, cy + 5*s,  54*s, 30*s);
+    });
+
+    // ── Title ─────────────────────────────────────────────────────
+    this.add.text(W / 2, 36, 'TUTORIAL WORLD', {
+      fontSize: '26px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', stroke: '#3a6090', strokeThickness: 5,
+    }).setOrigin(0.5);
+
+    // ── Level positions (slight Y variation like Dadish) ──────────
+    const lvPos = [
+      { x: 115, y: 265 },
+      { x: 253, y: 240 },
+      { x: 393, y: 268 },
+      { x: 533, y: 243 },
+      { x: 663, y: 262 },
+    ];
+
+    // ── Read completion state ──────────────────────────────────────
+    const lvl1Done = this.registry.get('level1Complete') || false;
+    const lvl1Star = this.registry.get('level1Star')     || false;
+
+    // ── Connecting dashed path ────────────────────────────────────
+    const pathGfx = this.add.graphics();
+    pathGfx.lineStyle(7, 0xc8a878, 1);
+    for (let i = 0; i < lvPos.length - 1; i++) {
+      this._dashed(pathGfx, lvPos[i], lvPos[i + 1], 12, 9);
+    }
+
+    // ── Level nodes ────────────────────────────────────────────────
+    lvPos.forEach((p, i) => {
+      const n        = i + 1;
+      const unlocked = n === 1;
+      const done     = n === 1 && lvl1Done;
+      const star     = n === 1 && lvl1Star;
+      this._node(p.x, p.y, n, unlocked, done, star);
+    });
+
+    // ── Back button ───────────────────────────────────────────────
+    const back = this.add.text(20, 20, '◀  Menu', {
+      fontSize: '15px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', backgroundColor: '#00000055', padding: { x: 10, y: 6 },
+    }).setInteractive({ useHandCursor: true });
+    back.on('pointerover', () => back.setAlpha(0.75));
+    back.on('pointerout',  () => back.setAlpha(1.00));
+    back.on('pointerdown', () => this.scene.start('MenuScene'));
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────
+
+  _dashed(gfx, a, b, dash, gap) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const nx = dx / len, ny = dy / len;
+    let d = 0, on = true;
+    while (d < len) {
+      const seg = Math.min(on ? dash : gap, len - d);
+      if (on) {
+        gfx.beginPath();
+        gfx.moveTo(a.x + nx * d,       a.y + ny * d);
+        gfx.lineTo(a.x + nx * (d+seg), a.y + ny * (d+seg));
+        gfx.strokePath();
+      }
+      d += seg; on = !on;
+    }
+  }
+
+  _node(x, y, n, unlocked, done, hasStar) {
+    const R   = 33;
+    const con = this.add.container(x, y);
+
+    const gfx = this.add.graphics();
+    con.add(gfx);
+
+    if (unlocked) {
+      // Drop shadow
+      gfx.fillStyle(0x000000, 0.18).fillCircle(4, 6, R);
+      // Fill + border
+      gfx.fillStyle(done ? 0xf5c518 : 0xffffff, 1).fillCircle(0, 0, R);
+      gfx.lineStyle(5, done ? 0xd4a800 : 0x5b8dd9, 1).strokeCircle(0, 0, R);
+
+      // Level number
+      con.add(this.add.text(0, 0, `${n}`, {
+        fontSize: '28px', fontFamily: '"Arial Black", Arial, sans-serif',
+        color: done ? '#7a5000' : '#2c5aa0',
+      }).setOrigin(0.5));
+
+      // Hover / click (use container hit area)
+      con.setSize(R * 2, R * 2).setInteractive({ useHandCursor: true });
+      con.on('pointerover', () =>
+        this.tweens.add({ targets: con, scaleX: 1.12, scaleY: 1.12, duration: 110, ease: 'Back.easeOut' }));
+      con.on('pointerout', () =>
+        this.tweens.add({ targets: con, scaleX: 1, scaleY: 1, duration: 110 }));
+      con.on('pointerdown', () =>
+        this.tweens.add({ targets: con, scaleX: 0.9, scaleY: 0.9, duration: 80, yoyo: true,
+          onComplete: () => this.scene.start('GameScene') }));
+
+    } else {
+      // Locked ─ gray node
+      gfx.fillStyle(0x000000, 0.15).fillCircle(4, 6, R);
+      gfx.fillStyle(0xaaaaaa, 1).fillCircle(0, 0, R);
+      gfx.lineStyle(5, 0x888888, 1).strokeCircle(0, 0, R);
+
+      // Padlock icon
+      const lg = this.add.graphics();
+      lg.fillStyle(0xffffff, 0.65).fillRoundedRect(-11, -4, 22, 18, 4);
+      lg.lineStyle(5, 0xffffff, 0.65);
+      lg.beginPath(); lg.arc(0, -4, 10, Math.PI, 0, false); lg.strokePath();
+      con.add(lg);
+    }
+
+    // Star (filled gold if collected, gray outline if not)
+    const sg  = this.add.graphics();
+    const sy  = R + 18;   // below the circle
+    const pts = Array.from({ length: 10 }, (_, i) => {
+      const angle = (i * Math.PI / 5) - Math.PI / 2;
+      const r     = i % 2 === 0 ? 10 : 4;
+      return new Phaser.Math.Vector2(Math.cos(angle) * r, sy + Math.sin(angle) * r);
+    });
+    if (hasStar) { sg.fillStyle(0xf5c518, 1).fillPoints(pts, true); }
+    sg.lineStyle(2, hasStar ? 0xd4a800 : 0xaaaaaa, 1).strokePoints(pts, true);
+    con.add(sg);
+  }
+}
+
 // Phaser.Scale.FIT scales the 800×480 canvas to fill the browser window
 // while maintaining aspect ratio.  backgroundColor matches the sky so
 // any slim letterbox is invisible.
@@ -1002,5 +1146,5 @@ new Phaser.Game({
     height: 480,
   },
   physics: { default:'arcade', arcade:{ gravity:{ y:600 }, debug:false } },
-  scene:  [PreloadScene, MenuScene, GameScene]
+  scene:  [PreloadScene, MenuScene, MapScene, GameScene]
 });
