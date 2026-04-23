@@ -1128,64 +1128,68 @@ class MapScene extends Phaser.Scene {
   }
 
   _node(x, y, n, unlocked, done, hasStar) {
-    const R   = 33;
-    const con = this.add.container(x, y);
+    const R = 33;
 
+    // Draw everything in world-space so no container transforms interfere.
     const gfx = this.add.graphics();
-    con.add(gfx);
 
     if (unlocked) {
       // Drop shadow
-      gfx.fillStyle(0x000000, 0.18).fillCircle(4, 6, R);
+      gfx.fillStyle(0x000000, 0.18).fillCircle(x + 4, y + 6, R);
       // Fill + border
-      gfx.fillStyle(done ? 0xf5c518 : 0xffffff, 1).fillCircle(0, 0, R);
-      gfx.lineStyle(5, done ? 0xd4a800 : 0x5b8dd9, 1).strokeCircle(0, 0, R);
+      gfx.fillStyle(done ? 0xf5c518 : 0xffffff, 1).fillCircle(x, y, R);
+      gfx.lineStyle(5, done ? 0xd4a800 : 0x5b8dd9, 1).strokeCircle(x, y, R);
 
-      // Level number
-      con.add(this.add.text(0, 0, `${n}`, {
+      // Level number (separate text object at world coords)
+      const lbl = this.add.text(x, y, `${n}`, {
         fontSize: '28px', fontFamily: '"Arial Black", Arial, sans-serif',
         color: done ? '#7a5000' : '#2c5aa0',
-      }).setOrigin(0.5));
+      }).setOrigin(0.5);
 
-      // Hover / click — use a plain Zone for reliable hit detection.
-      // container.setInteractive() can mis-size its area and swallow all
-      // subsequent input; a Zone at world coords avoids that entirely.
-      const zone = this.add.zone(x, y, R * 2, R * 2)
-        .setInteractive({ useHandCursor: true });
-      zone.on('pointerover', () =>
-        this.tweens.add({ targets: con, scaleX: 1.12, scaleY: 1.12, duration: 110, ease: 'Back.easeOut' }));
-      zone.on('pointerout', () =>
-        this.tweens.add({ targets: con, scaleX: 1, scaleY: 1, duration: 110 }));
-      zone.on('pointerdown', () => {
-        this.tweens.add({ targets: con, scaleX: 0.9, scaleY: 0.9, duration: 80, yoyo: true });
-        this.time.delayedCall(160, () => this.scene.start('GameScene'));
+      // Make the graphics itself the hit area — circle geom at world pos
+      gfx.setInteractive(
+        new Phaser.Geom.Circle(x, y, R),
+        Phaser.Geom.Circle.Contains
+      );
+      this.input.setDefaultCursor('default');
+      gfx.on('pointerover', () => {
+        this.input.setDefaultCursor('pointer');
+        this.tweens.add({ targets: [gfx, lbl], scaleX: 1.12, scaleY: 1.12, duration: 110, ease: 'Back.easeOut' });
+      });
+      gfx.on('pointerout', () => {
+        this.input.setDefaultCursor('default');
+        this.tweens.add({ targets: [gfx, lbl], scaleX: 1, scaleY: 1, duration: 110 });
+      });
+      gfx.on('pointerup', () => {
+        this.scene.start('GameScene');
       });
 
     } else {
-      // Locked ─ gray node
-      gfx.fillStyle(0x000000, 0.15).fillCircle(4, 6, R);
-      gfx.fillStyle(0xaaaaaa, 1).fillCircle(0, 0, R);
-      gfx.lineStyle(5, 0x888888, 1).strokeCircle(0, 0, R);
+      // Locked — gray node, no interaction
+      gfx.fillStyle(0x000000, 0.15).fillCircle(x + 4, y + 6, R);
+      gfx.fillStyle(0xaaaaaa, 1).fillCircle(x, y, R);
+      gfx.lineStyle(5, 0x888888, 1).strokeCircle(x, y, R);
 
-      // Padlock icon
+      // Padlock body (white rectangle)
+      gfx.fillStyle(0xffffff, 0.65).fillRoundedRect(x - 11, y - 4, 22, 18, 4);
+      // Padlock shackle (arc drawn via strokeCircle trick using lineStyle)
       const lg = this.add.graphics();
-      lg.fillStyle(0xffffff, 0.65).fillRoundedRect(-11, -4, 22, 18, 4);
       lg.lineStyle(5, 0xffffff, 0.65);
-      lg.beginPath(); lg.arc(0, -4, 10, Math.PI, 0, false); lg.strokePath();
-      con.add(lg);
+      lg.beginPath();
+      lg.arc(x, y - 4, 10, Math.PI, 0, false);
+      lg.strokePath();
     }
 
-    // Star (filled gold if collected, gray outline if not)
+    // Star indicator below the circle (gold if collected, gray outline if not)
     const sg  = this.add.graphics();
-    const sy  = R + 18;   // below the circle
+    const sy  = y + R + 18;
     const pts = Array.from({ length: 10 }, (_, i) => {
       const angle = (i * Math.PI / 5) - Math.PI / 2;
       const r     = i % 2 === 0 ? 10 : 4;
-      return new Phaser.Math.Vector2(Math.cos(angle) * r, sy + Math.sin(angle) * r);
+      return new Phaser.Math.Vector2(x + Math.cos(angle) * r, sy + Math.sin(angle) * r);
     });
     if (hasStar) { sg.fillStyle(0xf5c518, 1).fillPoints(pts, true); }
     sg.lineStyle(2, hasStar ? 0xd4a800 : 0xaaaaaa, 1).strokePoints(pts, true);
-    con.add(sg);
   }
 }
 
