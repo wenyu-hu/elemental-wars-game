@@ -1269,16 +1269,15 @@ class HUDScene extends Phaser.Scene {
     const H  = this.scale.height;  // 480
     this._gs = this.scene.get('GameScene');
 
-    // ── Panel background (semi-transparent strip at bottom) ──
-    const PANEL_H = 80;
-    const panelY  = H - PANEL_H;
-    this.add.rectangle(0, panelY, W, PANEL_H, 0x000000, 0.45).setOrigin(0, 0);
-    this.add.rectangle(0, panelY, W, 2, 0x000000, 0.5).setOrigin(0, 0);
+    // ── Layout reference (no visible panel) ───────
+    const panelY = H - 80;
 
     // ── Bar geometry ──────────────────────────────
-    const BAR_X = 150, BAR_W = 260, BAR_H = 14;
-    const xpY   = panelY + 18;
-    const hpY   = panelY + 40;
+    // Bars are horizontally centred on the screen.
+    const BAR_W = 260, BAR_H = 14;
+    const BAR_X = Math.round((W - BAR_W) / 2);  // 270 for W=800
+    const xpY   = panelY + 18;                  // 418
+    const hpY   = panelY + 40;                  // 440
     this._BAR_W = BAR_W;
 
     // ── XP bar (blue) ─────────────────────────────
@@ -1308,11 +1307,12 @@ class HUDScene extends Phaser.Scene {
       color: '#ffffff', stroke: '#000000', strokeThickness: 2,
     }).setOrigin(0.5);
 
-    // ── Pause button (yellow) ─────────────────────
-    const pb = this.add.rectangle(28, panelY + 40, 36, 36, 0xffd54f)
+    // ── Pause button (yellow) — bottom-left, same row as slots ──
+    const btnY = panelY + 65;
+    const pb = this.add.rectangle(28, btnY, 36, 36, 0xffd54f)
       .setStrokeStyle(3, 0xc99a1a)
       .setInteractive({ useHandCursor: true });
-    this.pauseIcon = this.add.text(28, panelY + 40, '⏸', {
+    this.pauseIcon = this.add.text(28, btnY, '⏸', {
       fontSize: '22px', fontFamily: 'Arial, sans-serif',
       color: '#000000',
     }).setOrigin(0.5);
@@ -1321,19 +1321,20 @@ class HUDScene extends Phaser.Scene {
     pb.on('pointerup',   () => this._togglePause());
 
     // ── Inventory button (chest) ──────────────────
-    const ib = this.add.rectangle(72, panelY + 40, 36, 36, 0xb98b5a)
+    const ib = this.add.rectangle(72, btnY, 36, 36, 0xb98b5a)
       .setStrokeStyle(3, 0x6b4a25)
       .setInteractive({ useHandCursor: true });
-    this.add.image(72, panelY + 41, 'chest', 0).setScale(1.6);
+    this.add.image(72, btnY + 1, 'chest', 0).setScale(1.6);
     ib.on('pointerover', () => ib.setFillStyle(0xd4a46c));
     ib.on('pointerout',  () => ib.setFillStyle(0xb98b5a));
     ib.on('pointerup',   () => { /* TODO: inventory UI */ });
 
-    // ── 10 Element slots ──────────────────────────
-    const slotSize  = 20;
+    // ── 10 Element slots (aligned with bar edges) ──
+    const slotSize  = 22;
     const slotGap   = 4;
-    const slotY     = panelY + 68;
-    const slotStart = BAR_X;
+    const slotRowW  = 10 * slotSize + 9 * slotGap;   // 256
+    const slotStart = BAR_X + Math.round((BAR_W - slotRowW) / 2);  // centres slots under bars
+    const slotY     = panelY + 65;
     for (let i = 0; i < 10; i++) {
       const sx = slotStart + i * (slotSize + slotGap);
       this.add.rectangle(sx, slotY, slotSize, slotSize, 0x8b98a7)
