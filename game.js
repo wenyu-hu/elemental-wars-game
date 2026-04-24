@@ -141,6 +141,15 @@ class GameScene extends Phaser.Scene {
     this._gotStar       = false;   // temp flag — cleared on death, saved on portal
     this._starBobTween  = null;
 
+    // ── Player stats (HUD reads these directly) ──────────────────────
+    this._maxHp       = 100;
+    this._hp          = 100;
+    this._level       = 0;
+    this._xp          = 0;
+    this._xpToNext    = 15;         // level 0 → 1 needs 15 XP
+    this._paused      = false;
+    this.SPIKE_DAMAGE = 50;
+
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
     this.cameras.main.setBackgroundColor(0xeef8ff);
     this.addBackground(WORLD_W, WORLD_H);
@@ -177,7 +186,7 @@ class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.player.sprite, this.patrolDummy.sprite);
     this.physics.add.overlap(
       this.player.sprite, this.spikes,
-      () => this.respawnPlayer(), null, this
+      () => this.hitBySpikes(), null, this
     );
     this.physics.add.overlap(
       this.player.sprite, this.portal,
@@ -225,6 +234,14 @@ class GameScene extends Phaser.Scene {
     this._jumpHeld = false;
     this._spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this._dummyDialogTriggered = false;
+
+    // ESC toggles pause
+    this.input.keyboard.on('keydown-ESC', () => this.togglePause());
+
+    // Launch HUD in parallel (runs on top of GameScene, no camera zoom)
+    this.scene.launch('HUDScene');
+    // Stop the HUD when this scene shuts down (e.g. reaching portal)
+    this.events.once('shutdown', () => this.scene.stop('HUDScene'));
 
     this.buildAnims();
     this.player.sprite.anims.play('idle', true);
@@ -435,7 +452,47 @@ class GameScene extends Phaser.Scene {
         duration: 75, yoyo: true, repeat: 7,
         onComplete: () => { p.sprite.setAlpha(1); this._spikeHit = false; }
       });
+
+      // Full heal on respawn
+      this._hp = this._maxHp;
     });
+  }
+
+  // Called on spike overlap: 50 damage + i-frames, only respawns at 0 HP
+  hitBySpikes() {
+    if (this._spikeHit) return;
+
+    this._hp = Math.max(0, this._hp - this.SPIKE_DAMAGE);
+
+    if (this._hp <= 0) {
+      this.respawnPlayer();   // full death flow (sets i-frames itself)
+      return;
+    }
+
+    // Damage without death — i-frame flash, red tint, shake
+    this._spikeHit = true;
+    const p = this.player;
+    p.sprite.setTintFill(0xff4444);
+    this.cameras.main.shake(120, 0.008);
+    this.time.delayedCall(160, () => p.sprite.clearTint());
+    this.tweens.add({
+      targets: p.sprite, alpha: 0.35,
+      duration: 75, yoyo: true, repeat: 6,
+      onComplete: () => { p.sprite.setAlpha(1); this._spikeHit = false; }
+    });
+  }
+
+  togglePause() {
+    this._paused = !this._paused;
+    if (this._paused) {
+      this.physics.world.pause();
+      this.anims.pauseAll();
+      this.tweens.pauseAll();
+    } else {
+      this.physics.world.resume();
+      this.anims.resumeAll();
+      this.tweens.resumeAll();
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -744,6 +801,9 @@ class GameScene extends Phaser.Scene {
   //  Update loop
   // ─────────────────────────────────────────────────────────────────
   update(time, delta) {
+    // Frozen when paused — physics.world is also paused so entities stay put
+    if (this._paused) return;
+
     // These always run — even during dialog
     this._updateInstructionBoxes();
     this.updatePatrolDummy();   // must never pause: dummy roams off-platform if skipped
@@ -1198,6 +1258,128 @@ class MapScene extends Phaser.Scene {
   }
 }
 
+// ── HUDScene ─────────────────────────────────
+// Runs in parallel with GameScene. Uses its own camera (no zoom) so all
+// HUD elements render at full 800×480 resolution on top of the game.
+class HUDScene extends Phaser.Scene {
+  constructor() { super('HUDScene'); }
+
+  create() {
+    const W  = this.scale.width;   // 800
+    const H  = this.scale.height;  // 480
+    this._gs = this.scene.get('GameScene');
+
+    // ── Panel background (semi-transparent strip at bottom) ──
+    const PANEL_H = 80;
+    const panelY  = H - PANEL_H;
+    this.add.rectangle(0, panelY, W, PANEL_H, 0x000000, 0.45).setOrigin(0, 0);
+    this.add.rectangle(0, panelY, W, 2, 0x000000, 0.5).setOrigin(0, 0);
+
+    // ── Bar geometry ──────────────────────────────
+    const BAR_X = 150, BAR_W = 260, BAR_H = 14;
+    const xpY   = panelY + 18;
+    const hpY   = panelY + 40;
+    this._BAR_W = BAR_W;
+
+    // ── XP bar (blue) ─────────────────────────────
+    this.add.rectangle(BAR_X, xpY, BAR_W, BAR_H, 0x222222).setOrigin(0, 0.5);
+    this.xpFill = this.add.rectangle(BAR_X, xpY, 0, BAR_H, 0x3b9fff).setOrigin(0, 0.5);
+    this.add.rectangle(BAR_X, xpY, BAR_W, BAR_H)
+      .setOrigin(0, 0.5).setStrokeStyle(2, 0x000000).setFillStyle();
+    this.xpText = this.add.text(BAR_X + BAR_W / 2, xpY, '0/15', {
+      fontSize: '11px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', stroke: '#000000', strokeThickness: 2,
+    }).setOrigin(0.5);
+
+    // Level badge — circle on the left of the XP bar
+    this.add.circle(BAR_X - 4, xpY, 14, 0x3b9fff).setStrokeStyle(3, 0x1e5a9d);
+    this.lvlText = this.add.text(BAR_X - 4, xpY, '0', {
+      fontSize: '15px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', stroke: '#1e5a9d', strokeThickness: 2,
+    }).setOrigin(0.5);
+
+    // ── HP bar (green) ────────────────────────────
+    this.add.rectangle(BAR_X, hpY, BAR_W, BAR_H, 0x222222).setOrigin(0, 0.5);
+    this.hpFill = this.add.rectangle(BAR_X, hpY, BAR_W, BAR_H, 0x52a850).setOrigin(0, 0.5);
+    this.add.rectangle(BAR_X, hpY, BAR_W, BAR_H)
+      .setOrigin(0, 0.5).setStrokeStyle(2, 0x000000).setFillStyle();
+    this.hpText = this.add.text(BAR_X + BAR_W / 2, hpY, '100/100', {
+      fontSize: '11px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', stroke: '#000000', strokeThickness: 2,
+    }).setOrigin(0.5);
+
+    // ── Pause button (yellow) ─────────────────────
+    const pb = this.add.rectangle(28, panelY + 40, 36, 36, 0xffd54f)
+      .setStrokeStyle(3, 0xc99a1a)
+      .setInteractive({ useHandCursor: true });
+    this.pauseIcon = this.add.text(28, panelY + 40, '⏸', {
+      fontSize: '22px', fontFamily: 'Arial, sans-serif',
+      color: '#000000',
+    }).setOrigin(0.5);
+    pb.on('pointerover', () => pb.setFillStyle(0xffe47a));
+    pb.on('pointerout',  () => pb.setFillStyle(0xffd54f));
+    pb.on('pointerup',   () => this._togglePause());
+
+    // ── Inventory button (chest) ──────────────────
+    const ib = this.add.rectangle(72, panelY + 40, 36, 36, 0xb98b5a)
+      .setStrokeStyle(3, 0x6b4a25)
+      .setInteractive({ useHandCursor: true });
+    this.add.image(72, panelY + 41, 'chest', 0).setScale(1.6);
+    ib.on('pointerover', () => ib.setFillStyle(0xd4a46c));
+    ib.on('pointerout',  () => ib.setFillStyle(0xb98b5a));
+    ib.on('pointerup',   () => { /* TODO: inventory UI */ });
+
+    // ── 10 Element slots ──────────────────────────
+    const slotSize  = 20;
+    const slotGap   = 4;
+    const slotY     = panelY + 68;
+    const slotStart = BAR_X;
+    for (let i = 0; i < 10; i++) {
+      const sx = slotStart + i * (slotSize + slotGap);
+      this.add.rectangle(sx, slotY, slotSize, slotSize, 0x8b98a7)
+        .setStrokeStyle(2, 0x000000)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerup', () => { /* TODO: elements */ });
+    }
+
+    // ── Effects placeholder area (right side) ─────
+    // (Empty for now — per spec, irrelevant until status effects are added.)
+
+    // ── PAUSED overlay (hidden by default) ────────
+    this.pausedText = this.add.text(W / 2, H / 2, 'PAUSED', {
+      fontSize: '48px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', stroke: '#000000', strokeThickness: 6,
+    }).setOrigin(0.5).setVisible(false);
+  }
+
+  _togglePause() {
+    this._gs.togglePause();
+    const paused = this._gs._paused;
+    this.pauseIcon.setText(paused ? '▶' : '⏸');
+    this.pausedText.setVisible(paused);
+  }
+
+  update() {
+    if (!this._gs || !this._gs.scene.isActive()) return;
+    const gs = this._gs;
+
+    // HP bar
+    this.hpFill.displayWidth = (gs._hp / gs._maxHp) * this._BAR_W;
+    this.hpText.setText(`${gs._hp}/${gs._maxHp}`);
+
+    // XP bar + level
+    this.xpFill.displayWidth = (gs._xp / gs._xpToNext) * this._BAR_W;
+    this.xpText.setText(`${gs._xp}/${gs._xpToNext}`);
+    this.lvlText.setText(`${gs._level}`);
+
+    // Keep pause icon in sync (in case ESC toggled it)
+    const paused = gs._paused;
+    if (paused && this.pauseIcon.text !== '▶') this.pauseIcon.setText('▶');
+    if (!paused && this.pauseIcon.text !== '⏸') this.pauseIcon.setText('⏸');
+    this.pausedText.setVisible(paused);
+  }
+}
+
 // Phaser.Scale.FIT scales the 800×480 canvas to fill the browser window
 // while maintaining aspect ratio.  backgroundColor matches the sky so
 // any slim letterbox is invisible.
@@ -1213,5 +1395,5 @@ new Phaser.Game({
     height: 480,
   },
   physics: { default:'arcade', arcade:{ gravity:{ y:600 }, debug:false } },
-  scene:  [PreloadScene, MenuScene, MapScene, GameScene]
+  scene:  [PreloadScene, MenuScene, MapScene, GameScene, HUDScene]
 });
