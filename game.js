@@ -1307,8 +1307,8 @@ class HUDScene extends Phaser.Scene {
       color: '#ffffff', stroke: '#000000', strokeThickness: 2,
     }).setOrigin(0.5);
 
-    // ── Pause button (yellow) — bottom-left, same row as slots ──
-    const btnY = panelY + 65;
+    // ── Pause button (yellow) — raised so there's air below it ──
+    const btnY = panelY + 50;   // was 65; 15px higher for bottom padding
     const pb = this.add.rectangle(28, btnY, 36, 36, 0xffd54f)
       .setStrokeStyle(3, 0xc99a1a)
       .setInteractive({ useHandCursor: true });
@@ -1329,15 +1329,52 @@ class HUDScene extends Phaser.Scene {
     ib.on('pointerout',  () => ib.setFillStyle(0xb98b5a));
     ib.on('pointerup',   () => { /* TODO: inventory UI */ });
 
+    // ── Arrows button (3 drawn arrows + quantity badge) ──
+    const ab = this.add.rectangle(116, btnY, 36, 36, 0xa5adb8)
+      .setStrokeStyle(3, 0x4a4f5a)
+      .setInteractive({ useHandCursor: true });
+    // Draw 3 diagonal arrows with Graphics (quiver look)
+    const ag = this.add.graphics();
+    ag.lineStyle(2, 0x1e2a38, 1);
+    for (let i = 0; i < 3; i++) {
+      const dy = (i - 1) * 5;
+      ag.beginPath();
+      ag.moveTo(116 - 11, btnY - 4 + dy + 7);
+      ag.lineTo(116 + 9,  btnY - 4 + dy - 7);
+      ag.strokePath();
+    }
+    ag.fillStyle(0x1e2a38, 1);
+    for (let i = 0; i < 3; i++) {
+      const dy = (i - 1) * 5;
+      ag.fillTriangle(
+        116 + 9,  btnY - 4 + dy - 7,
+        116 + 3,  btnY - 4 + dy - 4,
+        116 + 6,  btnY - 4 + dy,
+      );
+      // Fletching squares at tail
+      ag.fillRect(116 - 13, btnY - 4 + dy + 6, 3, 3);
+    }
+    // Quantity badge (bottom-right)
+    this.arrowCount = this.add.text(116 + 14, btnY + 14, '0', {
+      fontSize: '12px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', stroke: '#000000', strokeThickness: 3,
+    }).setOrigin(1, 1);
+    ab.on('pointerover', () => ab.setFillStyle(0xb8bfcb));
+    ab.on('pointerout',  () => ab.setFillStyle(0xa5adb8));
+    ab.on('pointerup',   () => { /* TODO: arrows UI */ });
+
     // ── 10 Element slots (aligned with bar edges) ──
+    // setOrigin(0, 0.5) → sx is the LEFT edge of each slot (not centre).
+    // Without this, default origin 0.5 makes the row sit ~11px too far left.
     const slotSize  = 22;
     const slotGap   = 4;
-    const slotRowW  = 10 * slotSize + 9 * slotGap;   // 256
-    const slotStart = BAR_X + Math.round((BAR_W - slotRowW) / 2);  // centres slots under bars
+    const slotRowW  = 10 * slotSize + 9 * slotGap;                 // 256
+    const slotStart = BAR_X + Math.round((BAR_W - slotRowW) / 2);  // 272 (2px in from bar edge)
     const slotY     = panelY + 65;
     for (let i = 0; i < 10; i++) {
       const sx = slotStart + i * (slotSize + slotGap);
       this.add.rectangle(sx, slotY, slotSize, slotSize, 0x8b98a7)
+        .setOrigin(0, 0.5)
         .setStrokeStyle(2, 0x000000)
         .setInteractive({ useHandCursor: true })
         .on('pointerup', () => { /* TODO: elements */ });
