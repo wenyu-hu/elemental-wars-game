@@ -7,6 +7,194 @@ const SCALE = 3;
 const TILE  = 32;
 const TS    = TILE * SCALE;   // 96px display per tile
 
+// ─────────────────────────────────────────────
+//  Auth / progress persistence (localStorage)
+// ─────────────────────────────────────────────
+// localStorage is per-origin + per-browser profile, so "max accounts per
+// device/browser" maps naturally to capping the accounts array length.
+
+const EW_ACCOUNTS_KEY          = 'ew_accounts';
+const EW_SESSION_KEY           = 'ew_session';
+const MAX_ACCOUNTS_PER_DEVICE  = 3;
+
+// djb2-ish hash — not crypto-secure, but avoids plaintext passwords in
+// localStorage. Works everywhere, synchronously.
+function simpleHash(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(16);
+}
+
+function loadAccounts() {
+  try { return JSON.parse(localStorage.getItem(EW_ACCOUNTS_KEY) || '[]'); }
+  catch { return []; }
+}
+function writeAccounts(accounts) {
+  localStorage.setItem(EW_ACCOUNTS_KEY, JSON.stringify(accounts));
+}
+function getSessionUsername() {
+  return localStorage.getItem(EW_SESSION_KEY) || null;
+}
+function setSessionUsername(username) {
+  if (username) localStorage.setItem(EW_SESSION_KEY, username);
+  else           localStorage.removeItem(EW_SESSION_KEY);
+}
+function currentUser() {
+  const name = getSessionUsername();
+  if (!name) return null;
+  return loadAccounts().find(a => a.username === name) || null;
+}
+
+function signUp(username, password) {
+  username = (username || '').trim();
+  if (!username || !password) throw new Error('Username and password are required.');
+  if (username.length > 20)   throw new Error('Username is too long (max 20).');
+  const accounts = loadAccounts();
+  if (accounts.length >= MAX_ACCOUNTS_PER_DEVICE) {
+    throw new Error(`Max ${MAX_ACCOUNTS_PER_DEVICE} accounts per device reached.`);
+  }
+  if (accounts.some(a => a.username.toLowerCase() === username.toLowerCase())) {
+    throw new Error('That username is already taken on this device.');
+  }
+  accounts.push({ username, passwordHash: simpleHash(password), progress: {} });
+  writeAccounts(accounts);
+  setSessionUsername(username);
+}
+
+function logIn(username, password) {
+  username = (username || '').trim();
+  if (!username || !password) throw new Error('Username and password are required.');
+  const accounts = loadAccounts();
+  const hash = simpleHash(password);
+  const acc  = accounts.find(a =>
+    a.username.toLowerCase() === username.toLowerCase() && a.passwordHash === hash
+  );
+  if (!acc) throw new Error('Invalid username or password.');
+  setSessionUsername(acc.username);
+}
+
+function logOut() { setSessionUsername(null); }
+
+// Merge-save so we never downgrade fields (e.g. keeps level1Star=true if
+// the player replays without collecting the star).
+function saveProgress(update) {
+  const name = getSessionUsername();
+  if (!name) return;                      // guests never persist
+  const accounts = loadAccounts();
+  const idx = accounts.findIndex(a => a.username === name);
+  if (idx === -1) return;
+  accounts[idx].progress = { ...(accounts[idx].progress || {}), ...update };
+  writeAccounts(accounts);
+}
+
+// ─────────────────────────────────────────────
+//  DOM auth form overlay (login or signup)
+// ─────────────────────────────────────────────
+function showAuthForm({ mode, onSuccess, onCancel }) {
+  const old = document.getElementById('ew-auth-overlay');
+  if (old) old.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'ew-auth-overlay';
+  overlay.style.cssText = [
+    'position:fixed', 'inset:0', 'background:rgba(0,0,0,0.55)',
+    'display:flex', 'justify-content:center', 'align-items:center',
+    'z-index:9999', 'font-family:"Arial Black",Arial,sans-serif',
+  ].join(';');
+
+  const card = document.createElement('div');
+  card.style.cssText = [
+    'background:#fff', 'padding:22px 28px', 'border-radius:14px',
+    'min-width:300px', 'box-shadow:0 12px 48px rgba(0,0,0,0.35)',
+    'display:flex', 'flex-direction:column', 'gap:10px',
+  ].join(';');
+
+  const title = document.createElement('h2');
+  title.textContent = mode === 'login' ? 'Log In' : 'Sign Up';
+  title.style.cssText = 'margin:0 0 6px;color:#ff5722;font-size:22px;';
+  card.appendChild(title);
+
+  const makeField = (labelText, type, autocomplete) => {
+    const wrap = document.createElement('label');
+    wrap.textContent = labelText;
+    wrap.style.cssText = 'display:flex;flex-direction:column;font-size:12px;color:#555;';
+    const input = document.createElement('input');
+    input.type = type;
+    input.autocomplete = autocomplete;
+    input.style.cssText = [
+      'margin-top:4px', 'padding:8px 10px',
+      'font:16px Arial,sans-serif', 'border:2px solid #ccc',
+      'border-radius:6px', 'outline:none',
+    ].join(';');
+    input.addEventListener('focus', () => { input.style.borderColor = '#ff5722'; });
+    input.addEventListener('blur',  () => { input.style.borderColor = '#ccc';    });
+    wrap.appendChild(input);
+    card.appendChild(wrap);
+    return input;
+  };
+
+  const userInput = makeField('Username', 'text',     'username');
+  const passInput = makeField('Password', 'password',
+    mode === 'login' ? 'current-password' : 'new-password');
+
+  const err = document.createElement('div');
+  err.style.cssText = 'color:#c62828;font-size:12px;min-height:16px;';
+  card.appendChild(err);
+
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:10px;justify-content:flex-end;margin-top:4px;';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.cssText = [
+    'padding:8px 16px', 'font:14px "Arial Black",Arial,sans-serif',
+    'color:#555', 'background:#eee', 'border:none', 'border-radius:6px', 'cursor:pointer',
+  ].join(';');
+
+  const submitBtn = document.createElement('button');
+  submitBtn.textContent = mode === 'login' ? 'Log In' : 'Create Account';
+  submitBtn.style.cssText = [
+    'padding:8px 16px', 'font:14px "Arial Black",Arial,sans-serif',
+    'color:#fff', 'background:#ff5722', 'border:none', 'border-radius:6px', 'cursor:pointer',
+  ].join(';');
+
+  row.appendChild(cancelBtn);
+  row.appendChild(submitBtn);
+  card.appendChild(row);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  setTimeout(() => userInput.focus(), 0);
+
+  const close = () => overlay.remove();
+  const submit = () => {
+    try {
+      if (mode === 'login') logIn(userInput.value, passInput.value);
+      else                  signUp(userInput.value, passInput.value);
+      close();
+      onSuccess && onSuccess();
+    } catch (e) {
+      err.textContent = e.message || String(e);
+    }
+  };
+
+  cancelBtn.addEventListener('click', () => { close(); onCancel && onCancel(); });
+  submitBtn.addEventListener('click', submit);
+  [userInput, passInput].forEach(el => {
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+  });
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) { close(); onCancel && onCancel(); }
+  });
+  const escHandler = e => {
+    if (e.key === 'Escape') {
+      document.removeEventListener('keydown', escHandler);
+      close();
+      onCancel && onCancel();
+    }
+  };
+  document.addEventListener('keydown', escHandler);
+}
+
 // ── PreloadScene ────────────────────────────
 class PreloadScene extends Phaser.Scene {
   constructor() { super('PreloadScene'); }
@@ -103,16 +291,52 @@ class MenuScene extends Phaser.Scene {
       fontSize: '20px', fontFamily: 'Arial, sans-serif', color: '#2d6a4f'
     }).setOrigin(0.5);
 
-    const btn = this.add.text(width/2, height/2+28, '  PLAY  ', {
-      fontSize: '26px', fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffffff', backgroundColor: '#ff5722', padding: { x:28, y:13 }
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    // ── Sync registry with saved progress for current session ──
+    // Logged-in  → load their saved progress into the registry
+    // Guest/none → wipe registry so the game starts clean
+    const user     = currentUser();
+    const progress = user ? (user.progress || {}) : {};
+    this.registry.set('level1Complete', !!progress.level1Complete);
+    this.registry.set('level1Star',     !!progress.level1Star);
+    this.registry.set('isGuest',        !user);
 
-    btn.on('pointerover', () => btn.setStyle({ backgroundColor: '#e64a19' }));
-    btn.on('pointerout',  () => btn.setStyle({ backgroundColor: '#ff5722' }));
-    btn.on('pointerup',   () => this.scene.start('MapScene'));
-    this.input.keyboard.once('keydown-ENTER', () => this.scene.start('MapScene'));
-    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('MapScene'));
+    const makeBtn = (y, label, bg, hover, onClick) => {
+      const b = this.add.text(width/2, y, `  ${label}  `, {
+        fontSize: '20px', fontFamily: '"Arial Black", Arial, sans-serif',
+        color: '#ffffff', backgroundColor: bg, padding: { x: 22, y: 10 }
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      b.on('pointerover', () => b.setStyle({ backgroundColor: hover }));
+      b.on('pointerout',  () => b.setStyle({ backgroundColor: bg }));
+      b.on('pointerup',   onClick);
+      return b;
+    };
+
+    const startGame = () => this.scene.start('MapScene');
+
+    if (user) {
+      this.add.text(width/2, height/2 - 5, `Welcome back, ${user.username}!`, {
+        fontSize: '16px', fontFamily: '"Arial Black", Arial, sans-serif',
+        color: '#2d6a4f', stroke: '#ffffff', strokeThickness: 3
+      }).setOrigin(0.5);
+      makeBtn(height/2 + 40, 'PLAY',    '#ff5722', '#e64a19', startGame);
+      makeBtn(height/2 + 95, 'LOG OUT', '#8c8c8c', '#6c6c6c', () => {
+        logOut();
+        this.scene.restart();
+      });
+      this.input.keyboard.once('keydown-ENTER', startGame);
+      this.input.keyboard.once('keydown-SPACE', startGame);
+    } else {
+      makeBtn(height/2 + 10, 'LOG IN', '#3b9fff', '#1e7ae5', () => {
+        showAuthForm({ mode: 'login',  onSuccess: () => this.scene.restart() });
+      });
+      makeBtn(height/2 + 58, 'SIGN UP', '#4caf50', '#388e3c', () => {
+        showAuthForm({ mode: 'signup', onSuccess: () => this.scene.restart() });
+      });
+      makeBtn(height/2 + 106, 'PLAY AS GUEST', '#ff9800', '#ef6c00', startGame);
+      // ENTER/SPACE default to "Play as Guest" when not logged in
+      this.input.keyboard.once('keydown-ENTER', startGame);
+      this.input.keyboard.once('keydown-SPACE', startGame);
+    }
 
     this.add.text(width/2, height-24,
       'Arrow keys / WASD  ·  ↑/W = jump (×2)  ·  ↓/S = duck  ·  E or , = attack',
@@ -984,6 +1208,10 @@ class GameScene extends Phaser.Scene {
     this._portalReached = true;
     this.registry.set('level1Complete', true);
     if (this._gotStar) this.registry.set('level1Star', true);  // only saved now
+    // Persist to localStorage for logged-in users (guests are no-ops).
+    const update = { level1Complete: true };
+    if (this._gotStar) update.level1Star = true;
+    saveProgress(update);
     this.victoryText.setVisible(true);
     this.time.delayedCall(2500, () => this.scene.start('MapScene'));
   }
