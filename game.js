@@ -165,7 +165,23 @@ function showAuthForm({ mode, onSuccess, onCancel }) {
   document.body.appendChild(overlay);
   setTimeout(() => userInput.focus(), 0);
 
-  const close = () => overlay.remove();
+  // Stop pointer events from leaking through to the Phaser canvas underneath
+  // (otherwise clicks on inputs also hit MenuScene buttons and rebuild the form).
+  ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click'].forEach(evt => {
+    overlay.addEventListener(evt, e => e.stopPropagation());
+  });
+
+  // Disable Phaser keyboard input while typing so captured keys (W/A/S/D/E/, etc.)
+  // reach the text inputs instead of being preventDefault'd by Phaser.
+  const game = window._ewGame;
+  const kb = game && game.input && game.input.keyboard;
+  const prevKbEnabled = kb ? kb.enabled : null;
+  if (kb) kb.enabled = false;
+
+  const close = () => {
+    if (kb) kb.enabled = prevKbEnabled;
+    overlay.remove();
+  };
   const submit = () => {
     try {
       if (mode === 'login') logIn(userInput.value, passInput.value);
@@ -1649,7 +1665,7 @@ class HUDScene extends Phaser.Scene {
 // Phaser.Scale.FIT scales the 800×480 canvas to fill the browser window
 // while maintaining aspect ratio.  backgroundColor matches the sky so
 // any slim letterbox is invisible.
-new Phaser.Game({
+window._ewGame = new Phaser.Game({
   type:   Phaser.AUTO,
   parent: 'game-container',
   backgroundColor: '#eef8ff',
