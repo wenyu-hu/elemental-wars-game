@@ -316,6 +316,16 @@ class MenuScene extends Phaser.Scene {
     this.registry.set('level1Star',     !!progress.level1Star);
     this.registry.set('isGuest',        !user);
 
+    // Hydrate the status sheet from saved progress (or reset to blank for guest/logged-out).
+    if (window.statusSheet) {
+      if (user) {
+        window.statusSheet.loadFromProgress();
+        window.statusSheet.setIdentity({ username: user.username, playerId: '' });
+      } else {
+        window.statusSheet.reset();
+      }
+    }
+
     const makeBtn = (y, label, bg, hover, onClick) => {
       const b = this.add.text(width/2, y, `  ${label}  `, {
         fontSize: '20px', fontFamily: '"Arial Black", Arial, sans-serif',
@@ -1571,7 +1581,13 @@ class HUDScene extends Phaser.Scene {
     this.add.image(72, btnY + 1, 'chest', 0).setScale(1.6);
     ib.on('pointerover', () => ib.setFillStyle(0xd4a46c));
     ib.on('pointerout',  () => ib.setFillStyle(0xb98b5a));
-    ib.on('pointerup',   () => { /* TODO: inventory UI */ });
+    ib.on('pointerup',   () => this._openStatusSheet());
+
+    // Hotkey: 'I' opens the status sheet (close handled by overlay itself).
+    this.input.keyboard.on('keydown-I', () => {
+      if (!window.statusSheet || window.statusSheet.isOpen()) return;
+      this._openStatusSheet();
+    });
 
     // ── Arrows button (3 drawn arrows + quantity badge) ──
     const ab = this.add.rectangle(116, btnY, 36, 36, 0xa5adb8)
@@ -1639,6 +1655,22 @@ class HUDScene extends Phaser.Scene {
     const paused = this._gs._paused;
     this.pauseIcon.setText(paused ? '▶' : '⏸');
     this.pausedText.setVisible(paused);
+  }
+
+  _openStatusSheet() {
+    if (!window.statusSheet) return;
+    const gs = this._gs;
+    const wasPaused = gs && gs._paused;
+    if (gs && !wasPaused) gs.togglePause();
+    // Mirror in-game HP into the sheet so the bar reflects current state.
+    if (gs && window.statusSheet.setStat) {
+      window.statusSheet.setStat('hp.current', gs._hp);
+      window.statusSheet.setStat('hp.max',     gs._maxHp);
+      window.statusSheet.setStat('level',      gs._level);
+    }
+    window.statusSheet.open({
+      onClose: () => { if (gs && !wasPaused) gs.togglePause(); },
+    });
   }
 
   update() {
