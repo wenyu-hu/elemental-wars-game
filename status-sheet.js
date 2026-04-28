@@ -210,6 +210,28 @@
     return true;
   }
 
+  // Award an item to the player.  If the item is equippable AND its slot
+  // is empty, it auto-equips.  Otherwise it goes to the inventory.
+  // Returns 'equipped' | 'inventory' | false.
+  function award(itemId, count) {
+    ensureRegistry();
+    const item = window.itemRegistry.get(itemId);
+    if (!item) return false;
+    const n = Math.max(1, Number(count) || 1);
+    if (item.equippable) {
+      const slotKey = window.itemRegistry.types[item.type].slot;
+      const slot    = state.equipment[slotKey];
+      if (slot && !slot.itemId) {
+        slot.itemId = itemId;
+        // Any extras (count > 1) drop into inventory.
+        if (n > 1) giveItem(itemId, n - 1);
+        persist();
+        return 'equipped';
+      }
+    }
+    return giveItem(itemId, n) ? 'inventory' : false;
+  }
+
   // Unequip whatever's in the given slot, returning it to inventory.
   function unequip(slotKey) {
     const slot = state.equipment[slotKey];
@@ -736,6 +758,7 @@
     giveItem, takeItem,
     equip,    unequip,
     consume,
+    award,
     addEnchantment,
 
     // Freeform list APIs

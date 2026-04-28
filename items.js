@@ -123,21 +123,19 @@
   function allItems()  { return Object.values(REGISTRY); }
   function getType(t)  { return TYPE_DEFS[t] || null; }
 
-  // ── Sample items ─────────────────────────────
-  // Add new item definitions here.  Drop the matching
-  // icon PNG into assets/.  Stats keys must match
+  // ── Item definitions ─────────────────────────
+  // Add new items here.  Drop the matching icon PNG
+  // into assets/.  Stats keys must match
   // TYPE_DEFS[type].stats.
-  //
-  // Example (uncomment after adding assets/iron_sword.png):
-  //
-  //   defineItem({
-  //     id: 'iron_sword',
-  //     name: 'Iron Sword',
-  //     iconSrc: 'assets/iron_sword.png',
-  //     type: 'meleeWeapon',
-  //     rarity: 'rare',
-  //     stats: { damage: 12, attackSpeed: 1.2, range: 3, specialities: '' },
-  //   });
+
+  defineItem({
+    id:      'wooden_sword',
+    name:    'Wooden Sword',
+    iconSrc: 'assets/Sword.png',
+    type:    'meleeWeapon',
+    rarity:  'common',
+    stats: { damage: 2, attackSpeed: 0.6, range: 3, specialities: '' },
+  });
 
   // ── Expose ───────────────────────────────────
   window.itemRegistry = {

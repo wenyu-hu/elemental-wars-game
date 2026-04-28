@@ -219,10 +219,12 @@ class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('player_idle',   'assets/idle.png',   { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('player_walk',   'assets/walk.png',   { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('player_jump',   'assets/jump.png',   { frameWidth: 18, frameHeight: 31 });
-    this.load.spritesheet('player_attack', 'assets/attack.png', { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('player_attack',        'assets/attack.png',        { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('player_weapon_attack', 'assets/weapon_attack.png', { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('player_duck',   'assets/duck.png',   { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('dummy',         'assets/dummy.png',  { frameWidth: 27, frameHeight: 25 });
     this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 14, frameHeight: 16 });
+    this.load.image('item_wooden_sword', 'assets/Sword.png');
     this.load.image('ground',   'assets/ground.png');
     this.load.image('dirt',     'assets/dirt.png');
     this.load.image('platform', 'assets/platform.png');
@@ -264,7 +266,8 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('player_idle',   0x4488ff, 1, 18, 31);
     makeSheet('player_walk',   0x4488ff, 4, 18, 31);
     makeSheet('player_jump',   0x44aaff, 3, 18, 31);
-    makeSheet('player_attack', 0xff8844, 4, 18, 31);
+    makeSheet('player_attack',        0xff8844, 4, 18, 31);
+    makeSheet('player_weapon_attack', 0xffaa44, 3, 18, 31);
     makeSheet('player_duck',   0x2266cc, 1, 18, 31);
     makeSheet('dummy',         0xcc4444, 2, 27, 25);
     makeSheet('chest',         0xcc9922, 2, 14, 16);
@@ -312,8 +315,9 @@ class MenuScene extends Phaser.Scene {
     // Guest/none → wipe registry so the game starts clean
     const user     = currentUser();
     const progress = user ? (user.progress || {}) : {};
-    this.registry.set('level1Complete', !!progress.level1Complete);
-    this.registry.set('level1Star',     !!progress.level1Star);
+    this.registry.set('level1Complete',    !!progress.level1Complete);
+    this.registry.set('level1Star',        !!progress.level1Star);
+    this.registry.set('level1ChestOpened', !!progress.level1ChestOpened);
     this.registry.set('isGuest',        !user);
 
     // Hydrate the status sheet from saved progress (or reset to blank for guest/logged-out).
@@ -781,6 +785,16 @@ class GameScene extends Phaser.Scene {
     add('walk',         'player_walk',   0, 3,  8);
     add('jump',         'player_jump',   0, 2,  6, 0);
     add('attack',       'player_attack', 0, 3, 12, 0);
+    // Weapon swing: raise (frames 0→2) then bring down (2→0).  Plays in
+    // ~0.33s (5 frames @ 15 fps) so the hit-check at 200 ms lands during
+    // the downswing.  Animation is built from explicit frames so we can
+    // re-use the 3 raise frames in reverse for the strike.
+    if (!this.anims.exists('weapon_attack')) {
+      this.anims.create({
+        key: 'weapon_attack', frameRate: 15, repeat: 0,
+        frames: [0, 1, 2, 1, 0].map(f => ({ key: 'player_weapon_attack', frame: f })),
+      });
+    }
     add('duck',         'player_duck',   0, 0,  4);
     add('dummy_idle',   'dummy',         0, 0,  4);
     add('dummy_hit',    'dummy',         1, 1,  4, 0);
@@ -1067,6 +1081,17 @@ class GameScene extends Phaser.Scene {
       return;   // freeze player input while dialog is open
     }
 
+    // Chest cinematic: freeze input & player, allow Space to skip ahead.
+    if (this._chestSequenceActive) {
+      const bod = this.player && this.player.sprite && this.player.sprite.body;
+      if (bod) bod.setVelocity(0, bod.velocity.y);    // arrest horizontal drift
+      if (Phaser.Input.Keyboard.JustDown(this._spaceKey) && this._chestSkipHandler) {
+        this._chestSkipHandler();
+      }
+      this.updateDummyBar();
+      return;
+    }
+
     this.updatePlayer(delta);
     this.updateDummyBar();
     this._checkDummyProximity();
@@ -1087,8 +1112,10 @@ class GameScene extends Phaser.Scene {
 
     if ((k.e.isDown || k.comma.isDown) && p.attackCooldown <= 0) {
       p.isAttacking = true; p.attackCooldown = 600;
-      s.anims.play('attack', true);
-      s.once('animationcomplete-attack', () => { p.isAttacking = false; });
+      const armed   = this._isArmedMelee();
+      const animKey = armed ? 'weapon_attack' : 'attack';
+      s.anims.play(animKey, true);
+      s.once('animationcomplete-' + animKey, () => { p.isAttacking = false; });
       this.time.delayedCall(200, () => this.checkAttackHit());
       return;
     }
@@ -1214,6 +1241,13 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  // True iff the player has a melee weapon equipped via the status sheet.
+  _isArmedMelee() {
+    if (!window.statusSheet) return false;
+    const eq = window.statusSheet.getState().equipment;
+    return !!(eq && eq.meleeWeapon && eq.meleeWeapon.itemId);
+  }
+
   openChest() {
     const c = this.chest;
     if (c.opened) return;
@@ -1224,9 +1258,204 @@ class GameScene extends Phaser.Scene {
     // Update respawn checkpoint to just left of the chest
     this._respawnX = c.sprite.x - 80;
     this._respawnY = c.sprite.y - 30;
-    // Brief "Checkpoint!" banner
-    this.checkpointText.setVisible(true);
-    this.time.delayedCall(1800, () => this.checkpointText.setVisible(false));
+
+    // First time on this save: play the cinematic and award the tutorial
+    // sword.  On replay runs the chest just shows the regular Checkpoint!
+    // banner so we don't duplicate the cinematic or the loot.
+    const firstOpen = !this.registry.get('level1ChestOpened');
+    if (firstOpen) {
+      this.registry.set('level1ChestOpened', true);
+      saveProgress({ level1ChestOpened: true });
+      this._playChestSequence({
+        xpGain: 10,
+        itemId: 'wooden_sword',
+        itemTextureKey: 'item_wooden_sword',
+      });
+    } else {
+      this.checkpointText.setVisible(true);
+      this.time.delayedCall(1800, () => this.checkpointText.setVisible(false));
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  //  Chest reward cinematic
+  //
+  //  Phases (Phaser tweens, all on a UI layer with scrollFactor 0):
+  //    1. Dim screen
+  //    2. Enlarged XP bar fades in with "+N XP" text
+  //    3. Text bursts into blue orbs that arc into the bar; both the
+  //       cinematic bar and the HUD's real bar tick up per orb
+  //    4. Bar fades out, an enlarged open-chest frame fades in with a
+  //       gold glow
+  //    5. The reward item rises out of the chest with its name +
+  //       rarity colour
+  //    6. Auto-dismisses after a short hold (Space skips ahead).
+  //
+  //  While the cinematic is active, _chestSequenceActive blocks player
+  //  input and movement updates.
+  // ─────────────────────────────────────────────────────────────────
+  _playChestSequence(opts) {
+    if (this._chestSequenceActive) return;
+    this._chestSequenceActive = true;
+
+    const W = this.scale.width, H = this.scale.height;
+    const cx = W / 2, cy = H / 2;
+    const D  = 1000;            // base depth for cinematic UI
+
+    const layer = [];
+    const add   = obj => { obj.setScrollFactor(0).setDepth(D); layer.push(obj); return obj; };
+
+    // Phase 1 — dim screen
+    const dim = add(this.add.rectangle(0, 0, W, H, 0x000000, 0).setOrigin(0));
+    this.tweens.add({ targets: dim, fillAlpha: 0.66, duration: 280, ease: 'Sine.easeOut' });
+
+    // Phase 2 — enlarged XP bar
+    const BIG_W = 540, BIG_H = 36;
+    const xpToNext = this._xpToNext;
+    const startXp  = this._xp;
+    const endXp    = Math.min(this._xp + opts.xpGain, xpToNext);
+
+    const barBg = add(this.add.rectangle(cx, cy, BIG_W, BIG_H, 0x222222).setStrokeStyle(3, 0x000000));
+    const barFill = add(this.add.rectangle(cx - BIG_W/2, cy, BIG_W * (startXp / xpToNext), BIG_H, 0x3b9fff)
+                        .setOrigin(0, 0.5));
+    const barText = add(this.add.text(cx, cy, `${startXp}/${xpToNext}`, {
+      fontSize: '20px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', stroke: '#000000', strokeThickness: 3,
+    }).setOrigin(0.5));
+    const xpLabel = add(this.add.text(cx, cy - 70, `+${opts.xpGain} XP`, {
+      fontSize: '40px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#3b9fff', stroke: '#ffffff', strokeThickness: 6,
+    }).setOrigin(0.5).setAlpha(0));
+    [barBg, barFill, barText, xpLabel].forEach(o => o.setAlpha(o === xpLabel ? 0 : 0).setScale(0.6));
+    this.tweens.add({
+      targets: [barBg, barFill, barText],
+      alpha: 1, scale: 1, duration: 320, ease: 'Back.easeOut',
+    });
+    this.tweens.add({
+      targets: xpLabel,
+      alpha: 1, duration: 280, delay: 240,
+      onComplete: () => this._chestPhaseOrbs(opts, {
+        cx, cy, BIG_W, BIG_H,
+        startXp, endXp, xpToNext,
+        barFill, barText, xpLabel, barBg, layer, add, D,
+        cleanup: () => layer.forEach(o => o.destroy()),
+      }),
+    });
+
+    // Skip key — Space speeds through and jumps to dismiss.
+    this._chestSkipHandler = () => {
+      if (this._chestDismiss) this._chestDismiss();
+    };
+  }
+
+  _chestPhaseOrbs(opts, ctx) {
+    const { cx, cy, BIG_W, BIG_H, startXp, endXp, xpToNext, barFill, barText, xpLabel } = ctx;
+    const ORB_COUNT = 6;
+    const xpPerOrb  = (endXp - startXp) / ORB_COUNT;
+    let landed = 0;
+
+    for (let i = 0; i < ORB_COUNT; i++) {
+      const orb = ctx.add(this.add.circle(cx + (i - ORB_COUNT/2) * 14, cy - 60, 8, 0x66c8ff));
+      orb.setStrokeStyle(2, 0x1a4d8c);
+      orb.setAlpha(0);
+      const targetX = cx - BIG_W/2 + BIG_W * ((startXp + xpPerOrb * (i + 1)) / xpToNext);
+      const delay   = 80 * i;
+      // Pop into existence at the label, then arc toward the bar.
+      this.tweens.add({ targets: orb, alpha: 1, duration: 120, delay });
+      this.tweens.add({
+        targets: orb,
+        x: targetX, y: cy,
+        duration: 480,
+        delay: delay + 120,
+        ease: 'Cubic.easeIn',
+        onComplete: () => {
+          // Pulse on impact + grow the bar fill.
+          this.tweens.add({ targets: orb, alpha: 0, scale: 2, duration: 140 });
+          const newXp   = startXp + xpPerOrb * (landed + 1);
+          const newW    = BIG_W * (newXp / xpToNext);
+          this.tweens.add({ targets: barFill, displayWidth: newW, duration: 160, ease: 'Sine.easeOut' });
+          // Update the real GameScene XP (HUD reflects automatically).
+          this._xp = Math.min(xpToNext, Math.round(newXp));
+          barText.setText(`${this._xp}/${xpToNext}`);
+          landed++;
+          if (landed === ORB_COUNT) {
+            // Snap to exact target value to avoid float drift.
+            this._xp = endXp;
+            barText.setText(`${endXp}/${xpToNext}`);
+            this.time.delayedCall(280, () => this._chestPhaseChest(opts, ctx));
+          }
+        },
+      });
+    }
+    // Fade label out as orbs leave.
+    this.tweens.add({ targets: xpLabel, alpha: 0, y: cy - 100, duration: 380, delay: 80 });
+  }
+
+  _chestPhaseChest(opts, ctx) {
+    const { cx, cy, barFill, barText, barBg } = ctx;
+    // Fade out bar
+    this.tweens.add({
+      targets: [barFill, barText, barBg], alpha: 0, duration: 260,
+      onComplete: () => {
+        // Gold glow + enlarged open-chest sprite (frame 1 = open).
+        const glow = ctx.add(this.add.circle(cx, cy, 90, 0xffd166, 0.0));
+        const chestImg = ctx.add(this.add.image(cx, cy, 'chest', 1).setScale(0));
+        this.tweens.add({ targets: glow,     fillAlpha: 0.55, scale: 1.4, duration: 420, ease: 'Sine.easeOut' });
+        this.tweens.add({ targets: chestImg, scale: 8,        duration: 380, ease: 'Back.easeOut',
+          onComplete: () => this._chestPhaseReward(opts, ctx, chestImg, glow),
+        });
+      },
+    });
+  }
+
+  _chestPhaseReward(opts, ctx, chestImg, glow) {
+    const { cx, cy } = ctx;
+    // Award the item to the status sheet (auto-equips if slot empty).
+    const result = window.statusSheet && window.statusSheet.award
+      ? window.statusSheet.award(opts.itemId, 1) : false;
+    const item = window.itemRegistry && window.itemRegistry.get(opts.itemId);
+
+    // Item sprite rises out of the chest.
+    const tex = this.textures.exists(opts.itemTextureKey) ? opts.itemTextureKey : null;
+    const itemImg = ctx.add(tex
+      ? this.add.image(cx, cy, tex).setScale(0)
+      : this.add.text(cx, cy, '?', { fontSize: '48px' }).setOrigin(0.5).setScale(0));
+    if (tex) itemImg.setScale(0);
+    this.tweens.add({
+      targets: itemImg,
+      scale: 5, y: cy - 80, duration: 520, ease: 'Back.easeOut',
+    });
+
+    // Item name in rarity colour + outcome line.
+    const rarityColor = {
+      common: '#aaaaaa', uncommon: '#44cc66', rare: '#4488ff', epicRare: '#e84057',
+      ultraRare: '#66ccff', legendary: '#ffcc00', mythical: '#88ee88',
+      elder: '#aa66dd', exclusive: '#ff77bb',
+    };
+    const name = item ? item.name : opts.itemId;
+    const colr = item && rarityColor[item.rarity] || '#ffffff';
+    const nameText = ctx.add(this.add.text(cx, cy + 60, name, {
+      fontSize: '28px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: colr, stroke: '#000000', strokeThickness: 4,
+    }).setOrigin(0.5).setAlpha(0));
+    const outcome = result === 'equipped' ? 'Auto-equipped!' : 'Added to inventory';
+    const subText = ctx.add(this.add.text(cx, cy + 96, outcome, {
+      fontSize: '16px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', stroke: '#000000', strokeThickness: 3,
+    }).setOrigin(0.5).setAlpha(0));
+    this.tweens.add({ targets: [nameText, subText], alpha: 1, duration: 320, delay: 200 });
+
+    // Auto-dismiss after a hold; Space also dismisses early.
+    this._chestDismiss = () => {
+      if (!this._chestSequenceActive) return;
+      this._chestDismiss = null;
+      this._chestSkipHandler = null;
+      this.tweens.add({
+        targets: ctx.layer, alpha: 0, duration: 280,
+        onComplete: () => { ctx.cleanup(); this._chestSequenceActive = false; },
+      });
+    };
+    this.time.delayedCall(1600, () => this._chestDismiss && this._chestDismiss());
   }
 
   reachPortal() {
