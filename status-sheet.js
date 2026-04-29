@@ -232,6 +232,22 @@
     return giveItem(itemId, n) ? 'inventory' : false;
   }
 
+  // Strip every copy of `itemId` from equipment + inventory.  Used by
+  // the chest-cinematic migration to clean test-run loot off saves that
+  // pre-date the chest update.
+  function removeItemEverywhere(itemId) {
+    let removed = 0;
+    for (const slot of Object.values(state.equipment || {})) {
+      if (slot && slot.itemId === itemId) { slot.itemId = null; removed++; }
+    }
+    for (let i = 0; i < state.inventory.length; i++) {
+      const cell = state.inventory[i];
+      if (cell && cell.itemId === itemId) { state.inventory[i] = null; removed++; }
+    }
+    if (removed) persist();
+    return removed;
+  }
+
   // Unequip whatever's in the given slot, returning it to inventory.
   function unequip(slotKey) {
     const slot = state.equipment[slotKey];
@@ -757,6 +773,7 @@
     // Item-driven API
     giveItem, takeItem,
     equip,    unequip,
+    removeItemEverywhere,
     consume,
     award,
     addEnchantment,
