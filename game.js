@@ -788,7 +788,13 @@ class GameScene extends Phaser.Scene {
     // Slightly smaller than the player so it reads as held, not stuck
     // on top of the sprite.
     const weaponSprite = this.add.image(x, y, 'item_wooden_sword')
-      .setScale(SCALE * 0.9).setOrigin(0.25, 0.85)
+      // Origin (0.5, 0.9) puts the pivot at the hilt centre — the
+      // texture is symmetric around its vertical axis, so the same
+      // angle negated mirrors the swing for the other facing without
+      // any flipX gymnastics.  The previous (0.25, 0.85) origin made
+      // the texture extend mostly to the right of the pivot, which
+      // sent the blade over the back of the head when facing left.
+      .setScale(SCALE * 0.9).setOrigin(0.5, 0.9)
       .setVisible(false).setDepth(sprite.depth + 1);
     return { sprite, weaponSprite, jumpsLeft: 2, isAttacking: false, attackCooldown: 0 };
   }
@@ -1131,6 +1137,31 @@ class GameScene extends Phaser.Scene {
     this._checkDummyProximity();
   }
 
+  // Drive the sword overlay through an asymmetric arc on each swing:
+  // a low windup behind the shoulder, a hard chop down past the rest
+  // pose, then a smooth recover back to rest.  Position and angle are
+  // both tweened so the blade follows the hand smoothly across the
+  // motion — independent of the 3-frame `weapon_attack` spritesheet,
+  // which is symmetric (same frames on the way up and down).
+  _beginSwingTween(p) {
+    p._swing = { x: 4, y: 8, a: 30 };          // start at REST
+    this.tweens.killTweensOf(p._swing);
+    this.tweens.chain({
+      targets: p._swing,
+      onComplete: () => { p._swing = null; },
+      tweens: [
+        // Windup — small backward cock at shoulder height.  Blade stays
+        // mostly upright (a=-20°) instead of folding behind the head.
+        { x: 5, y: 6, a: -20, duration: 110, ease: 'Sine.easeIn'  },
+        // Chop down — committed strike that goes well past the rest
+        // line so the swing actually visibly comes DOWN.
+        { x: 9, y: 14, a: 150, duration: 110, ease: 'Sine.easeIn'  },
+        // Recover — smooth return to the up-right rest pose.
+        { x: 4, y: 8,  a:  30, duration: 150, ease: 'Sine.easeOut' },
+      ],
+    });
+  }
+
   // Re-centre the 14×27 hitbox inside whatever frame the sprite is
   // currently displaying.  Cheap to call every tick (idempotent when
   // the frame width hasn't changed), and crucially closes the
@@ -1165,6 +1196,7 @@ class GameScene extends Phaser.Scene {
       s.anims.play(animKey, true);
       s.once('animationcomplete-' + animKey, () => { p.isAttacking = false; });
       this.time.delayedCall(200, () => this.checkAttackHit());
+      if (armed) this._beginSwingTween(p);
       return;
     }
 
@@ -1209,56 +1241,56 @@ class GameScene extends Phaser.Scene {
     const armed = this._isArmedMelee();
     w.setVisible(armed);
     if (!armed) return;
-    // Per-anim, per-frame pose for the sword overlay.  Coordinates are
-    // unscaled sprite px from the sprite's local centre (+x = forward,
-    // +y = down) and `a` is the sword angle in degrees (0 = blade up,
-    // 90 = blade pointing forward, 180 = blade pointing down).  The
-    // weapon_attack table tracks the raise→cock arc so the blade swings
-    // up on raise (frames 0→2) and snaps back down (frames 2→0).
-    const animKey = s.anims.currentAnim?.key || 'idle';
-    // Phaser frame indices are 1-based within the animation.
-    const frame   = (s.anims.currentFrame?.index || 1) - 1;
-    // Resting hand pose.  Blade points up-and-forward (a≈30°) so the
-    // sword "lives" beside the player rather than hanging point-down.
-    // y≈8 places the hilt at hip / hand height (sprite is 31 tall and
-    // origin centred, so y=8 puts the pivot below the torso, where the
-    // arm hangs).
-    const REST = { x: 4, y: 8, a: 30 };
-    const POSE = {
-      idle:          [REST],
-      walk:          [
-        REST,
-        { x: 5, y: 7, a: 25 },
-        REST,
-        { x: 3, y: 9, a: 35 },
-      ],
-      jump:          [
-        { x: 5, y:  7, a: 20 },
-        { x: 5, y:  5, a: 10 },
-        { x: 5, y:  7, a: 20 },
-      ],
-      duck:          [{ x: 5, y: 12, a: 35 }],
-      attack:        [
-        { x: 5, y:  7, a:  10 },
-        { x: 7, y:  4, a: -30 },
-        { x: 7, y:  9, a:  60 },
-      ],
-      // weapon_attack frames (raise → cock → swing-down) replayed as
-      // [0,1,2,1,0].  Frame 0 is at REST so the sword always returns to
-      // its up-right rest pose at the end of the swing.
-      weapon_attack: [
-        REST,                          // 0 rest
-        { x: 6, y:  3, a: -30 },       // 1 cocking back
-        { x: 5, y: -3, a: -90 },       // 2 cocked behind head
-      ],
-    };
-    const table = POSE[animKey] || POSE.idle;
-    const pose  = table[Math.min(Math.max(frame, 0), table.length - 1)];
+    // Pose values are in unscaled sprite px from the sprite's local
+    // centre (+x = forward, +y = down) and `a` is the angle in degrees
+    // (0 = blade straight up, +90 = blade forward, -90 = blade back).
+    // With origin (0.5, 0.9) the pivot is the hilt, so position values
+    // are also where the player's hand is.  Direction is encoded as
+    // `dir`: +1 facing right, -1 facing left, applied to both x and a
+    // so the sword mirrors via angle negation alone — no flipX needed.
+    let pose;
+    if (p._swing) {
+      // Tween-driven asymmetric swing arc set up by _beginSwingTween.
+      pose = p._swing;
+    } else {
+      const animKey = s.anims.currentAnim?.key || 'idle';
+      // Phaser frame indices are 1-based within the animation.
+      const frame   = (s.anims.currentFrame?.index || 1) - 1;
+      // y≈8 places the hilt at hip / hand height (sprite is 31 tall and
+      // origin-centred, so +8 unscaled puts the pivot below the torso
+      // where the arm hangs).  a=30° tilts the blade up-and-forward.
+      const REST = { x: 4, y: 8, a: 30 };
+      const POSE = {
+        idle:          [REST],
+        walk:          [
+          REST,
+          { x: 5, y: 7, a: 25 },
+          REST,
+          { x: 3, y: 9, a: 35 },
+        ],
+        jump:          [
+          { x: 5, y:  7, a: 20 },
+          { x: 5, y:  5, a: 10 },
+          { x: 5, y:  7, a: 20 },
+        ],
+        duck:          [{ x: 5, y: 12, a: 35 }],
+        attack:        [
+          { x: 5, y:  7, a:  10 },
+          { x: 7, y:  4, a: -30 },
+          { x: 7, y:  9, a:  60 },
+        ],
+        // Fallback for the first frame of weapon_attack before
+        // _beginSwingTween populates p._swing — same as REST.
+        weapon_attack: [REST, REST, REST],
+      };
+      const table = POSE[animKey] || POSE.idle;
+      pose = table[Math.min(Math.max(frame, 0), table.length - 1)];
+    }
     const facingRight = s.flipX;
     const dir = facingRight ? 1 : -1;
     w.setPosition(s.x + dir * pose.x * SCALE, s.y + pose.y * SCALE);
     w.setAngle(dir * pose.a);
-    w.setFlipX(!facingRight);
+    w.setFlipX(false);
     w.setDepth(s.depth + 1);
   }
 
