@@ -778,18 +778,17 @@ class GameScene extends Phaser.Scene {
     // larger frames shifts the body's world position (offset is from the
     // frame's top-left, so +x widening shifts body left).  That lets
     // the player phase into walls during the attack — including walking
-    // out of a spike pit.  Re-centre the 14×27 hitbox inside whatever
-    // frame is current and the body stays put across anim swaps.
-    sprite.on('animationupdate', (anim, frame) => {
-      sprite.body.setSize(14, 27).setOffset((frame.frame.width - 14) / 2, 2);
-    });
+    // out of a spike pit.  We re-centre the 14×27 hitbox in update() on
+    // every tick (see _syncBodyToFrame) instead of relying on
+    // `animationupdate`, which doesn't fire on the very first frame of
+    // a freshly-played anim — that one-frame gap was the leak.
     // Equipped-weapon overlay.  Hidden until a melee weapon is in the
     // status sheet; positioned each frame to follow the player's hand.
     // Origin is near the hilt so rotations swing the blade naturally.
     // Slightly smaller than the player so it reads as held, not stuck
     // on top of the sprite.
     const weaponSprite = this.add.image(x, y, 'item_wooden_sword')
-      .setScale(SCALE * 0.7).setOrigin(0.25, 0.85)
+      .setScale(SCALE * 0.9).setOrigin(0.25, 0.85)
       .setVisible(false).setDepth(sprite.depth + 1);
     return { sprite, weaponSprite, jumpsLeft: 2, isAttacking: false, attackCooldown: 0 };
   }
@@ -1132,8 +1131,22 @@ class GameScene extends Phaser.Scene {
     this._checkDummyProximity();
   }
 
+  // Re-centre the 14×27 hitbox inside whatever frame the sprite is
+  // currently displaying.  Cheap to call every tick (idempotent when
+  // the frame width hasn't changed), and crucially closes the
+  // one-frame window where `animationupdate` hasn't fired yet on a
+  // freshly-played anim with a different frame size.
+  _syncBodyToFrame(s) {
+    const fw = s.frame.width;
+    const want = (fw - 14) / 2;
+    if (s.body.offset.x !== want) {
+      s.body.setSize(14, 27).setOffset(want, 2);
+    }
+  }
+
   updatePlayer(delta) {
     const p = this.player, s = p.sprite, bod = s.body, k = this.keys;
+    this._syncBodyToFrame(s);
     const onGround = bod.blocked.down;
     if (onGround) p.jumpsLeft = 2;
     if (p.attackCooldown > 0) p.attackCooldown -= delta;
@@ -1207,33 +1220,36 @@ class GameScene extends Phaser.Scene {
     const frame   = (s.anims.currentFrame?.index || 1) - 1;
     // Resting hand pose.  Blade points up-and-forward (a≈30°) so the
     // sword "lives" beside the player rather than hanging point-down.
-    const REST = { x: 3, y: 2, a: 30 };
+    // y≈8 places the hilt at hip / hand height (sprite is 31 tall and
+    // origin centred, so y=8 puts the pivot below the torso, where the
+    // arm hangs).
+    const REST = { x: 4, y: 8, a: 30 };
     const POSE = {
       idle:          [REST],
       walk:          [
         REST,
-        { x: 4, y: 1, a: 25 },
+        { x: 5, y: 7, a: 25 },
         REST,
-        { x: 2, y: 3, a: 35 },
+        { x: 3, y: 9, a: 35 },
       ],
       jump:          [
-        { x: 4, y: 1, a: 20 },
-        { x: 4, y: -1, a: 10 },
-        { x: 4, y: 1, a: 20 },
+        { x: 5, y:  7, a: 20 },
+        { x: 5, y:  5, a: 10 },
+        { x: 5, y:  7, a: 20 },
       ],
-      duck:          [{ x: 4, y: 7, a: 35 }],
+      duck:          [{ x: 5, y: 12, a: 35 }],
       attack:        [
-        { x: 4, y: 1, a:  10 },
-        { x: 6, y: -2, a: -30 },
-        { x: 6, y:  3, a:  60 },
+        { x: 5, y:  7, a:  10 },
+        { x: 7, y:  4, a: -30 },
+        { x: 7, y:  9, a:  60 },
       ],
       // weapon_attack frames (raise → cock → swing-down) replayed as
       // [0,1,2,1,0].  Frame 0 is at REST so the sword always returns to
       // its up-right rest pose at the end of the swing.
       weapon_attack: [
         REST,                          // 0 rest
-        { x: 5, y: -3, a: -45 },       // 1 cocking back
-        { x: 4, y: -8, a: -110 },      // 2 cocked behind head
+        { x: 6, y:  3, a: -30 },       // 1 cocking back
+        { x: 5, y: -3, a: -90 },       // 2 cocked behind head
       ],
     };
     const table = POSE[animKey] || POSE.idle;
