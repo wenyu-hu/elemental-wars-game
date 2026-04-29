@@ -220,7 +220,7 @@ class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('player_walk',   'assets/walk.png',   { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('player_jump',   'assets/jump.png',   { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('player_attack',        'assets/attack.png',        { frameWidth: 18, frameHeight: 31 });
-    this.load.spritesheet('player_weapon_attack', 'assets/weapon_attack.png', { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('player_weapon_attack', 'assets/weapon_attack.png', { frameWidth: 32, frameHeight: 32 });
     this.load.spritesheet('player_duck',   'assets/duck.png',   { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('dummy',         'assets/dummy.png',  { frameWidth: 27, frameHeight: 25 });
     this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 14, frameHeight: 16 });
@@ -267,7 +267,7 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('player_walk',   0x4488ff, 4, 18, 31);
     makeSheet('player_jump',   0x44aaff, 3, 18, 31);
     makeSheet('player_attack',        0xff8844, 4, 18, 31);
-    makeSheet('player_weapon_attack', 0xffaa44, 3, 18, 31);
+    makeSheet('player_weapon_attack', 0xffaa44, 3, 32, 32);
     makeSheet('player_duck',   0x2266cc, 1, 18, 31);
     makeSheet('dummy',         0xcc4444, 2, 27, 25);
     makeSheet('chest',         0xcc9922, 2, 14, 16);
@@ -756,7 +756,12 @@ class GameScene extends Phaser.Scene {
     const sprite = this.physics.add.sprite(x, y, 'player_idle')
       .setScale(SCALE).setCollideWorldBounds(true).setFlipX(true);
     sprite.body.setSize(14, 27).setOffset(2, 2);
-    return { sprite, jumpsLeft: 2, isAttacking: false, attackCooldown: 0 };
+    // Equipped-weapon overlay.  Hidden until a melee weapon is in the
+    // status sheet; positioned each frame to follow the player's hand.
+    // Origin is near the hilt so rotations swing the blade naturally.
+    const weaponSprite = this.add.image(x, y, 'item_wooden_sword')
+      .setScale(SCALE).setOrigin(0.25, 0.85).setVisible(false).setDepth(sprite.depth + 1);
+    return { sprite, weaponSprite, jumpsLeft: 2, isAttacking: false, attackCooldown: 0 };
   }
 
   createDummy(x, y) {
@@ -1108,15 +1113,14 @@ class GameScene extends Phaser.Scene {
     if (onGround && !this._wasOnGround && !this._squashActive) this.squashPlayer();
     this._wasOnGround = onGround;
 
-    if (p.isAttacking) { this.applyHorizontalMove(p, k, 0.6); return; }
+    if (p.isAttacking) { this.applyHorizontalMove(p, k, 0.6); this._updateWeaponOverlay(); return; }
 
     if ((k.e.isDown || k.comma.isDown) && p.attackCooldown <= 0) {
       p.isAttacking = true; p.attackCooldown = 600;
-      const armed   = this._isArmedMelee();
-      const animKey = armed ? 'weapon_attack' : 'attack';
-      s.anims.play(animKey, true);
-      s.once('animationcomplete-' + animKey, () => { p.isAttacking = false; });
+      s.anims.play('attack', true);
+      s.once('animationcomplete-attack', () => { p.isAttacking = false; });
       this.time.delayedCall(200, () => this.checkAttackHit());
+      if (this._isArmedMelee()) this._swingWeapon();
       return;
     }
 
@@ -1149,6 +1153,40 @@ class GameScene extends Phaser.Scene {
     } else {
       s.anims.play('idle', true);
     }
+    this._updateWeaponOverlay();
+  }
+
+  // Position the equipped-melee overlay every frame so it tracks the
+  // player.  Hidden when no melee weapon is equipped.  flipX matches
+  // player facing (sprite.flipX === true means facing right).
+  _updateWeaponOverlay() {
+    const p = this.player, s = p.sprite, w = p.weaponSprite;
+    if (!w) return;
+    const armed = this._isArmedMelee();
+    w.setVisible(armed);
+    if (!armed) return;
+    const facingRight = s.flipX;
+    const handDX = facingRight ? 10 : -10;
+    const handDY = -2;
+    w.setPosition(s.x + handDX, s.y + handDY);
+    w.setFlipX(!facingRight);
+    w.setDepth(s.depth + 1);
+  }
+
+  // Animate the overlay sword swinging downward, then back to rest.
+  // Mirrors the player's facing so the blade arcs forward.
+  _swingWeapon() {
+    const p = this.player, w = p.weaponSprite;
+    if (!w) return;
+    const facingRight = p.sprite.flipX;
+    const swingDeg = facingRight ? 110 : -110;
+    if (this._weaponSwingTween) this._weaponSwingTween.stop();
+    w.setAngle(0);
+    this._weaponSwingTween = this.tweens.add({
+      targets: w, angle: swingDeg, duration: 180, ease: 'Cubic.easeIn',
+      yoyo: true, hold: 60,
+      onComplete: () => { w.setAngle(0); this._weaponSwingTween = null; },
+    });
   }
 
   applyHorizontalMove(p, k, mult) {
@@ -1765,7 +1803,7 @@ class HUDScene extends Phaser.Scene {
 
     // ── XP bar (blue) ─────────────────────────────
     this.add.rectangle(BAR_X, xpY, BAR_W, BAR_H, 0x222222).setOrigin(0, 0.5);
-    this.xpFill = this.add.rectangle(BAR_X, xpY, 0, BAR_H, 0x3b9fff).setOrigin(0, 0.5);
+    this.xpFill = this.add.rectangle(BAR_X, xpY, BAR_W, BAR_H, 0x3b9fff).setOrigin(0, 0.5);
     this.add.rectangle(BAR_X, xpY, BAR_W, BAR_H)
       .setOrigin(0, 0.5).setStrokeStyle(2, 0x000000).setFillStyle();
     this.xpText = this.add.text(BAR_X + BAR_W / 2, xpY, '0/15', {
