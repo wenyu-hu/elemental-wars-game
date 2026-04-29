@@ -411,11 +411,15 @@ class GameScene extends Phaser.Scene {
     // ── Player stats (HUD reads these directly) ──────────────────────
     this._maxHp       = 100;
     this._hp          = 100;
-    this._level       = 0;
-    this._xp          = 0;
-    this._xpToNext    = 15;         // level 0 → 1 needs 15 XP
     this._paused      = false;
     this.SPIKE_DAMAGE = 50;
+    // Hydrate XP/level from saved progress so progress sticks across
+    // runs.  Defaults match a fresh save.
+    const _user      = (typeof currentUser === 'function') ? currentUser() : null;
+    const _saved     = (_user && _user.progress) || {};
+    this._level    = Number(_saved.level)     || 0;
+    this._xp       = Number(_saved.xp)        || 0;
+    this._xpToNext = Number(_saved.xpToNext)  || 15;
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
     this.cameras.main.setBackgroundColor(0xeef8ff);
@@ -769,11 +773,24 @@ class GameScene extends Phaser.Scene {
     const sprite = this.physics.add.sprite(x, y, 'player_idle')
       .setScale(SCALE).setCollideWorldBounds(true).setFlipX(true);
     sprite.body.setSize(14, 27).setOffset(2, 2);
+    // The weapon_attack spritesheet uses 32×32 frames while every other
+    // player sheet is 18×31.  Without compensating, switching to those
+    // larger frames shifts the body's world position (offset is from the
+    // frame's top-left, so +x widening shifts body left).  That lets
+    // the player phase into walls during the attack — including walking
+    // out of a spike pit.  Re-centre the 14×27 hitbox inside whatever
+    // frame is current and the body stays put across anim swaps.
+    sprite.on('animationupdate', (anim, frame) => {
+      sprite.body.setSize(14, 27).setOffset((frame.frame.width - 14) / 2, 2);
+    });
     // Equipped-weapon overlay.  Hidden until a melee weapon is in the
     // status sheet; positioned each frame to follow the player's hand.
     // Origin is near the hilt so rotations swing the blade naturally.
+    // Slightly smaller than the player so it reads as held, not stuck
+    // on top of the sprite.
     const weaponSprite = this.add.image(x, y, 'item_wooden_sword')
-      .setScale(SCALE).setOrigin(0.25, 0.85).setVisible(false).setDepth(sprite.depth + 1);
+      .setScale(SCALE * 0.7).setOrigin(0.25, 0.85)
+      .setVisible(false).setDepth(sprite.depth + 1);
     return { sprite, weaponSprite, jumpsLeft: 2, isAttacking: false, attackCooldown: 0 };
   }
 
@@ -1188,29 +1205,35 @@ class GameScene extends Phaser.Scene {
     const animKey = s.anims.currentAnim?.key || 'idle';
     // Phaser frame indices are 1-based within the animation.
     const frame   = (s.anims.currentFrame?.index || 1) - 1;
+    // Resting hand pose.  Blade points up-and-forward (a≈30°) so the
+    // sword "lives" beside the player rather than hanging point-down.
+    const REST = { x: 3, y: 2, a: 30 };
     const POSE = {
-      idle:          [{ x: 4, y: 4, a: 110 }],
+      idle:          [REST],
       walk:          [
-        { x: 4, y: 4, a: 110 },
-        { x: 5, y: 3, a: 105 },
-        { x: 4, y: 4, a: 110 },
-        { x: 3, y: 5, a: 115 },
+        REST,
+        { x: 4, y: 1, a: 25 },
+        REST,
+        { x: 2, y: 3, a: 35 },
       ],
       jump:          [
-        { x: 5, y: 3, a:  95 },
-        { x: 5, y: 1, a:  80 },
-        { x: 5, y: 3, a:  95 },
+        { x: 4, y: 1, a: 20 },
+        { x: 4, y: -1, a: 10 },
+        { x: 4, y: 1, a: 20 },
       ],
-      duck:          [{ x: 5, y: 8, a: 120 }],
+      duck:          [{ x: 4, y: 7, a: 35 }],
       attack:        [
-        { x: 5, y: 2, a:  90 },
-        { x: 6, y: 0, a:  60 },
-        { x: 6, y: 4, a: 130 },
+        { x: 4, y: 1, a:  10 },
+        { x: 6, y: -2, a: -30 },
+        { x: 6, y:  3, a:  60 },
       ],
+      // weapon_attack frames (raise → cock → swing-down) replayed as
+      // [0,1,2,1,0].  Frame 0 is at REST so the sword always returns to
+      // its up-right rest pose at the end of the swing.
       weapon_attack: [
-        { x: 4, y:  4, a: 110 },   // 0 rest
-        { x: 5, y: -2, a:  40 },   // 1 mid raise
-        { x: 5, y: -8, a: -10 },   // 2 cocked overhead
+        REST,                          // 0 rest
+        { x: 5, y: -3, a: -45 },       // 1 cocking back
+        { x: 4, y: -8, a: -110 },      // 2 cocked behind head
       ],
     };
     const table = POSE[animKey] || POSE.idle;
@@ -1249,9 +1272,19 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  // Damage of the equipped melee weapon (or 1 for bare fists).
+  _meleeDamage() {
+    if (!window.statusSheet) return 1;
+    const slot = window.statusSheet.getState().equipment?.meleeWeapon;
+    const id   = slot?.itemId;
+    if (!id || !window.itemRegistry) return 1;
+    const item = window.itemRegistry.get(id);
+    return Math.max(1, Number(item?.stats?.damage) || 1);
+  }
+
   hitDummy() {
     const d = this.dummy;
-    d.hp = Math.max(0, d.hp - 1);
+    d.hp = Math.max(0, d.hp - this._meleeDamage());
     if (d.hp <= 0) {
       d.dead = true;
       d.sprite.anims.play('dummy_hit', true);
@@ -1274,7 +1307,7 @@ class GameScene extends Phaser.Scene {
 
   hitPatrolDummy() {
     const d = this.patrolDummy;
-    d.hp = Math.max(0, d.hp - 1);
+    d.hp = Math.max(0, d.hp - this._meleeDamage());
     if (d.hp <= 0) {
       d.dead = true;
       d.sprite.anims.play('dummy_hit', true);
@@ -1366,6 +1399,15 @@ class GameScene extends Phaser.Scene {
   //  While the cinematic is active, _chestSequenceActive blocks player
   //  input and movement updates.
   // ─────────────────────────────────────────────────────────────────
+  // Save XP/level/threshold so the bar doesn't snap back to 0/15 on the
+  // next run.  Only logged-in users persist (saveProgress is a no-op
+  // for guests, which is intentional).
+  _persistXp() {
+    if (typeof saveProgress === 'function') {
+      saveProgress({ xp: this._xp, level: this._level, xpToNext: this._xpToNext });
+    }
+  }
+
   _playChestSequence(opts) {
     if (this._chestSequenceActive) return;
     this._chestSequenceActive = true;
@@ -1388,8 +1430,14 @@ class GameScene extends Phaser.Scene {
     const endXp    = Math.min(this._xp + opts.xpGain, xpToNext);
 
     const barBg = add(this.add.rectangle(cx, cy, BIG_W, BIG_H, 0x222222).setStrokeStyle(3, 0x000000));
-    const barFill = add(this.add.rectangle(cx - BIG_W/2, cy, BIG_W * (startXp / xpToNext), BIG_H, 0x3b9fff)
+    // Use full BIG_W width and a `_fill` ratio property updated via
+    // setSize() each step.  Tweening `displayWidth` on a Rectangle with
+    // an initial width of 0 (when startXp = 0) collapses to a no-op
+    // because displayWidth = width * scaleX — there's nothing to scale.
+    const barFill = add(this.add.rectangle(cx - BIG_W/2, cy, BIG_W, BIG_H, 0x3b9fff)
                         .setOrigin(0, 0.5));
+    barFill._fill = startXp / xpToNext;
+    barFill.setSize(BIG_W * barFill._fill, BIG_H);
     const barText = add(this.add.text(cx, cy, `${startXp}/${xpToNext}`, {
       fontSize: '20px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff', stroke: '#000000', strokeThickness: 3,
@@ -1441,11 +1489,22 @@ class GameScene extends Phaser.Scene {
         delay: delay + 120,
         ease: 'Cubic.easeIn',
         onComplete: () => {
-          // Pulse on impact + grow the bar fill.
+          // Pulse on impact + grow the bar fill via an addCounter tween
+          // that drives setSize() — tweening displayWidth on a
+          // Rectangle with width=0 doesn't render any growth.
           this.tweens.add({ targets: orb, alpha: 0, scale: 2, duration: 140 });
           const newXp   = startXp + xpPerOrb * (landed + 1);
-          const newW    = BIG_W * (newXp / xpToNext);
-          this.tweens.add({ targets: barFill, displayWidth: newW, duration: 160, ease: 'Sine.easeOut' });
+          const fromF   = barFill._fill;
+          const toF     = newXp / xpToNext;
+          this.tweens.addCounter({
+            from: fromF, to: toF,
+            duration: 160, ease: 'Sine.easeOut',
+            onUpdate: t => {
+              const f = t.getValue();
+              barFill._fill = f;
+              barFill.setSize(BIG_W * f, BIG_H);
+            },
+          });
           // Update the real GameScene XP (HUD reflects automatically).
           this._xp = Math.min(xpToNext, Math.round(newXp));
           barText.setText(`${this._xp}/${xpToNext}`);
@@ -1454,6 +1513,7 @@ class GameScene extends Phaser.Scene {
             // Snap to exact target value to avoid float drift.
             this._xp = endXp;
             barText.setText(`${endXp}/${xpToNext}`);
+            this._persistXp();
             this.time.delayedCall(280, () => this._chestPhaseChest(opts, ctx));
           }
         },
