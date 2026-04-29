@@ -1117,10 +1117,11 @@ class GameScene extends Phaser.Scene {
 
     if ((k.e.isDown || k.comma.isDown) && p.attackCooldown <= 0) {
       p.isAttacking = true; p.attackCooldown = 600;
-      s.anims.play('attack', true);
-      s.once('animationcomplete-attack', () => { p.isAttacking = false; });
+      const armed   = this._isArmedMelee();
+      const animKey = armed ? 'weapon_attack' : 'attack';
+      s.anims.play(animKey, true);
+      s.once('animationcomplete-' + animKey, () => { p.isAttacking = false; });
       this.time.delayedCall(200, () => this.checkAttackHit());
-      if (this._isArmedMelee()) this._swingWeapon();
       return;
     }
 
@@ -1162,31 +1163,33 @@ class GameScene extends Phaser.Scene {
   _updateWeaponOverlay() {
     const p = this.player, s = p.sprite, w = p.weaponSprite;
     if (!w) return;
+    // Hide the overlay during the attack swing because the weapon_attack
+    // spritesheet draws the sword in the player's hand itself; showing
+    // both would double-render the blade.
     const armed = this._isArmedMelee();
-    w.setVisible(armed);
-    if (!armed) return;
+    const show  = armed && !p.isAttacking;
+    w.setVisible(show);
+    if (!show) return;
+    // Per-anim, per-frame hand offsets (in unscaled sprite px from the
+    // sprite's local centre).  Tuned by eye against the player art so
+    // the sword tracks the bobbing hand during walk, the raised arm on
+    // jump, and the lowered hand on duck.  X is forward, Y is downward.
+    const animKey = s.anims.currentAnim?.key || 'idle';
+    const frame   = s.anims.currentFrame?.index || 0;
+    const HAND = {
+      idle:  [{ x: 4, y: 0 }],
+      walk:  [{ x: 4, y: 0 }, { x: 5, y: -1 }, { x: 4, y: 0 }, { x: 3, y: 1 }],
+      jump:  [{ x: 5, y: -2 }, { x: 5, y: -3 }, { x: 5, y: -2 }],
+      duck:  [{ x: 5, y: 5 }],
+    };
+    const table  = HAND[animKey] || HAND.idle;
+    const offset = table[Math.min(frame, table.length - 1)] || table[0];
     const facingRight = s.flipX;
-    const handDX = facingRight ? 10 : -10;
-    const handDY = -2;
-    w.setPosition(s.x + handDX, s.y + handDY);
+    const dx = (facingRight ? 1 : -1) * offset.x * SCALE;
+    const dy = offset.y * SCALE;
+    w.setPosition(s.x + dx, s.y + dy);
     w.setFlipX(!facingRight);
     w.setDepth(s.depth + 1);
-  }
-
-  // Animate the overlay sword swinging downward, then back to rest.
-  // Mirrors the player's facing so the blade arcs forward.
-  _swingWeapon() {
-    const p = this.player, w = p.weaponSprite;
-    if (!w) return;
-    const facingRight = p.sprite.flipX;
-    const swingDeg = facingRight ? 110 : -110;
-    if (this._weaponSwingTween) this._weaponSwingTween.stop();
-    w.setAngle(0);
-    this._weaponSwingTween = this.tweens.add({
-      targets: w, angle: swingDeg, duration: 180, ease: 'Cubic.easeIn',
-      yoyo: true, hold: 60,
-      onComplete: () => { w.setAngle(0); this._weaponSwingTween = null; },
-    });
   }
 
   applyHorizontalMove(p, k, mult) {
