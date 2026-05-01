@@ -788,15 +788,17 @@ class GameScene extends Phaser.Scene {
     // Slightly smaller than the player so it reads as held, not stuck
     // on top of the sprite.
     const weaponSprite = this.add.image(x, y, 'item_wooden_sword')
-      // Origin lands on the visible hilt: the 32×32 Sword.png artwork
-      // bbox is (8, 4, 28, 24) — i.e. cols 8–27 / rows 4–23 — with 8
-      // rows of empty space at the bottom.  (0.55, 0.72) puts the
-      // pivot at col 17.5 / row 23 of the texture, which is the
-      // bottom-centre of the actual hilt.  That way `pose.y` in
-      // _updateWeaponOverlay is the real world-y of the hand.
-      // Symmetric vertically, so direction is just a sign on the
-      // angle — no flipX needed.
-      .setScale(SCALE * 0.9).setOrigin(0.55, 0.72)
+      // The Sword.png artwork is drawn DIAGONALLY: hilt grip is at
+      // texture coord (~10, 21) and the blade tip is at (~26, 5), so
+      // the blade naturally points up-and-right at 45° from vertical
+      // even at Phaser angle 0.  Two consequences:
+      //   1. Origin (0.31, 0.66) puts the rotation pivot on the grip
+      //      itself (col 10 / row 21) so rotations swing the sword
+      //      around the hand.
+      //   2. Every applied angle is offset by -45° in
+      //      _updateWeaponOverlay to undo the texture's built-in tilt
+      //      so `pose.a` is the actual visual angle from vertical.
+      .setScale(SCALE * 0.9).setOrigin(0.31, 0.66)
       .setVisible(false).setDepth(sprite.depth + 1);
     return { sprite, weaponSprite, jumpsLeft: 2, isAttacking: false, attackCooldown: 0 };
   }
@@ -1146,7 +1148,7 @@ class GameScene extends Phaser.Scene {
   // motion — independent of the 3-frame `weapon_attack` spritesheet,
   // which is symmetric (same frames on the way up and down).
   _beginSwingTween(p) {
-    p._swing = { x: 4, y: 4, a: 30 };          // start at REST
+    p._swing = { x: 4, y: 7, a: 30 };          // start at REST
     this.tweens.killTweensOf(p._swing);
     this.tweens.chain({
       targets: p._swing,
@@ -1155,12 +1157,12 @@ class GameScene extends Phaser.Scene {
         // Windup — small backward cock at shoulder height.  Blade
         // stays mostly upright (a=-20°) instead of folding behind the
         // head.
-        { x: 5, y: 2, a: -20, duration: 110, ease: 'Sine.easeIn'  },
+        { x: 5, y: 5, a: -20, duration: 110, ease: 'Sine.easeIn'  },
         // Chop down — committed strike that goes well past the rest
         // line so the swing actually visibly comes DOWN.
-        { x: 9, y: 10, a: 150, duration: 110, ease: 'Sine.easeIn'  },
+        { x: 9, y: 13, a: 150, duration: 110, ease: 'Sine.easeIn'  },
         // Recover — smooth return to the up-right rest pose.
-        { x: 4, y: 4,  a:  30, duration: 150, ease: 'Sine.easeOut' },
+        { x: 4, y: 7,  a:  30, duration: 150, ease: 'Sine.easeOut' },
       ],
     });
   }
@@ -1259,28 +1261,28 @@ class GameScene extends Phaser.Scene {
       const animKey = s.anims.currentAnim?.key || 'idle';
       // Phaser frame indices are 1-based within the animation.
       const frame   = (s.anims.currentFrame?.index || 1) - 1;
-      // Hand is just below the torso/belt — around y=4 unscaled below
+      // Hand sits at hip / waist height — around y=7 unscaled below
       // the sprite's local centre — and slightly forward (x=4).
       // a=30° tilts the blade up-and-forward out of the hand.
-      const REST = { x: 4, y: 4, a: 30 };
+      const REST = { x: 4, y: 7, a: 30 };
       const POSE = {
         idle:          [REST],
         walk:          [
           REST,
-          { x: 5, y: 3, a: 25 },
+          { x: 5, y: 6, a: 25 },
           REST,
-          { x: 3, y: 5, a: 35 },
+          { x: 3, y: 8, a: 35 },
         ],
         jump:          [
-          { x: 5, y:  3, a: 20 },
-          { x: 5, y:  1, a: 10 },
-          { x: 5, y:  3, a: 20 },
+          { x: 5, y:  6, a: 20 },
+          { x: 5, y:  4, a: 10 },
+          { x: 5, y:  6, a: 20 },
         ],
-        duck:          [{ x: 5, y: 8, a: 35 }],
+        duck:          [{ x: 5, y: 11, a: 35 }],
         attack:        [
-          { x: 5, y:  3, a:  10 },
-          { x: 7, y:  0, a: -30 },
-          { x: 7, y:  5, a:  60 },
+          { x: 5, y:  6, a:  10 },
+          { x: 7, y:  3, a: -30 },
+          { x: 7, y:  8, a:  60 },
         ],
         // Fallback for the first frame of weapon_attack before
         // _beginSwingTween populates p._swing — same as REST.
@@ -1291,8 +1293,14 @@ class GameScene extends Phaser.Scene {
     }
     const facingRight = s.flipX;
     const dir = facingRight ? 1 : -1;
+    // Position the pivot at the player's hand (pose.x/pose.y are in
+    // unscaled sprite px from sprite centre).
     w.setPosition(s.x + dir * pose.x * SCALE, s.y + pose.y * SCALE);
-    w.setAngle(dir * pose.a);
+    // Subtract 45° to undo Sword.png's built-in diagonal tilt so
+    // `pose.a` is the real visual angle from vertical (0 = blade up,
+    // +90 = blade horizontal forward, -90 = blade back).  `dir`
+    // mirrors the swing for facing-left without needing flipX.
+    w.setAngle(dir * pose.a - 45);
     w.setFlipX(false);
     w.setDepth(s.depth + 1);
   }
