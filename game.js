@@ -1219,6 +1219,10 @@ class GameScene extends Phaser.Scene {
       // Duck: play crouch anim but still allow slow horizontal movement
       s.anims.play('duck', true);
       this.applyHorizontalMove(p, k, 0.4);
+      // Keep the overlay tracking the player while ducking — without
+      // this, the sword stays painted at the last position before duck
+      // started and visibly floats while the player slides underneath.
+      this._updateWeaponOverlay();
       return;
     }
 
@@ -1278,7 +1282,14 @@ class GameScene extends Phaser.Scene {
           { x: 5, y:  4, a: 10 },
           { x: 5, y:  6, a: 20 },
         ],
-        duck:          [{ x: 5, y: 11, a: 35 }],
+        // Sheathed across the back: hilt sticks up over the shoulder,
+        // blade extends straight down behind the body.  Negative x =
+        // behind facing direction (mirrored by `dir`); pose.a = 180 →
+        // blade points down (after the -45 texture-tilt fix).  The
+        // overlay's depth is dropped below the player below, so only
+        // the hilt above the shoulder and the blade tip below the hip
+        // poke out of the silhouette — exactly the back-sheath look.
+        duck:          [{ x: -3, y: -1, a: 180 }],
         attack:        [
           { x: 5, y:  6, a:  10 },
           { x: 7, y:  3, a: -30 },
@@ -1302,7 +1313,11 @@ class GameScene extends Phaser.Scene {
     // mirrors the swing for facing-left without needing flipX.
     w.setAngle(dir * pose.a - 45);
     w.setFlipX(false);
-    w.setDepth(s.depth + 1);
+    // Sheathed-on-back when ducking → render behind the player so only
+    // the hilt and blade tip stick out of the silhouette.  Otherwise
+    // the sword sits in the hand in front of the body.
+    const sheathed = (s.anims.currentAnim?.key === 'duck');
+    w.setDepth(s.depth + (sheathed ? -1 : 1));
   }
 
   applyHorizontalMove(p, k, mult) {
