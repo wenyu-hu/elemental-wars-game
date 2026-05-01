@@ -420,6 +420,17 @@ class GameScene extends Phaser.Scene {
     this._level    = Number(_saved.level)     || 0;
     this._xp       = Number(_saved.xp)        || 0;
     this._xpToNext = Number(_saved.xpToNext)  || 15;
+    // Retro-credit for accounts that opened the chest before XP
+    // persistence existed.  If they've cleared the L1 chest gate but
+    // never recorded any XP, hand them the 10 XP the chest grants and
+    // mark a migration flag so we don't double-credit on the next run.
+    if (_user && _saved.level1ChestOpened &&
+        !_saved.xpMigratedFromChest && (Number(_saved.xp) || 0) === 0) {
+      this._xp = Math.min(this._xpToNext, 10);
+      if (typeof saveProgress === 'function') {
+        saveProgress({ xp: this._xp, xpMigratedFromChest: true });
+      }
+    }
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
     this.cameras.main.setBackgroundColor(0xeef8ff);
