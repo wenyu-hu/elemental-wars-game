@@ -1275,6 +1275,9 @@ class GameScene extends Phaser.Scene {
 
   updatePlayer(delta) {
     const p = this.player, s = p.sprite, bod = s.body, k = this.keys;
+    // Portal reached — input is locked while the level-complete
+    // sequence plays (player + portal shrink, then MapScene).
+    if (this._portalReached) return;
     this._syncBodyToFrame(s);
     const onGround = bod.blocked.down;
     if (onGround) p.jumpsLeft = 2;
@@ -1766,8 +1769,45 @@ class GameScene extends Phaser.Scene {
     const update = { level1Complete: true };
     if (this._gotStar) update.level1Star = true;
     saveProgress(update);
-    this.victoryText.setVisible(true);
-    this.time.delayedCall(2500, () => this.scene.start('MapScene'));
+
+    // ── Freeze the player ────────────────────────────────────────
+    // updatePlayer early-returns on _portalReached, so input is
+    // already locked.  Kill any in-flight motion / swing tween,
+    // disable the body so gravity can't drag the sprite down while
+    // it shrinks, and snap to idle so the silhouette is calm.
+    const p = this.player, ps = p.sprite;
+    if (p._swing) { this.tweens.killTweensOf(p._swing); p._swing = null; }
+    ps.body.setVelocity(0, 0);
+    ps.body.enable = false;
+    ps.anims.play('idle', true);
+
+    // Stop the portal's bob tween so it doesn't fight the shrink.
+    this.tweens.killTweensOf(this.portal);
+
+    // ── Banner ───────────────────────────────────────────────────
+    this.victoryText.setVisible(true).setAlpha(0).setScale(0.6);
+    this.tweens.add({
+      targets: this.victoryText,
+      alpha: 1, scale: 1,
+      duration: 280, ease: 'Back.easeOut',
+    });
+
+    // ── Shrink both player and portal into nothingness ──────────
+    const sinkTargets = [ps, this.portal];
+    // Include the held weapon if it's visible — otherwise a tiny
+    // sword would hang in the air after the player vanishes.
+    if (p.weaponSprite && p.weaponSprite.visible) sinkTargets.push(p.weaponSprite);
+    this.tweens.add({
+      targets: sinkTargets,
+      scaleX: 0, scaleY: 0, alpha: 0,
+      angle: '+=180',
+      duration: 900,
+      delay: 350,                          // let the banner pop first
+      ease: 'Back.easeIn',
+      onComplete: () => {
+        this.time.delayedCall(450, () => this.scene.start('MapScene'));
+      },
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────
