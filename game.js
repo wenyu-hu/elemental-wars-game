@@ -778,6 +778,83 @@ class GameScene extends Phaser.Scene {
   }
 
   // ─────────────────────────────────────────────────────────────────
+  //  Hitbox helper
+  //
+  //  Fits an arcade-physics body to the visible (alpha > 16) bounding
+  //  box of the object's texture frame.  Pixel data is read once per
+  //  (texture, frame) and cached on the Texture, so the cost is a
+  //  single canvas readback per asset for the whole game session.
+  //
+  //  Use this for any new entity unless you have a deliberate reason
+  //  to hand-tune (e.g. spikes are intentionally shrunk for player
+  //  forgiveness, the player's body is hand-tuned for cross-anim
+  //  consistency).
+  //
+  //    obj    : a physics-enabled GameObject (sprite or image)
+  //    opts   : { frame?, shrink?, pad? }
+  //      frame  - frame index or name to measure (default 0).  Frame
+  //               sizes can vary across animations; pick the frame
+  //               whose silhouette is most representative.
+  //      shrink - multiplier in [0,1] applied to width AND height,
+  //               keeping the bbox centred.  Use < 1 for forgiveness
+  //               (e.g. 0.85 makes contact feel deliberate).
+  //      pad    - extra pixel inset on every side, applied AFTER
+  //               shrink (positive = smaller body).
+  //
+  //  Limitation: arcade physics has one AABB per body.  If a sprite's
+  //  silhouette is L-shaped or has wide wings, the AABB will include
+  //  empty corners.  In that case attach extra invisible child-body
+  //  sprites and update their positions each tick — or move that
+  //  entity to Matter.js — neither is needed for current sprites.
+  // ─────────────────────────────────────────────────────────────────
+  _fitBodyToTexture(obj, opts = {}) {
+    const { frame = 0, shrink = 1, pad = 0 } = opts;
+    const tex = obj.texture;
+    if (!tex || !obj.body) return null;
+    const names = tex.getFrameNames();
+    const fkey  = (typeof frame === 'string')
+      ? frame
+      : (names[frame] !== undefined ? names[frame] : '__BASE');
+    const fr = tex.frames[fkey] || tex.frames['__BASE'];
+    if (!fr) return null;
+
+    tex._alphaBBoxCache = tex._alphaBBoxCache || {};
+    let bbox = tex._alphaBBoxCache[fkey];
+    if (!bbox) {
+      const img = tex.getSourceImage();
+      const fx = fr.cutX|0, fy = fr.cutY|0;
+      const fw = fr.cutWidth|0, fh = fr.cutHeight|0;
+      const cv = document.createElement('canvas');
+      cv.width = fw; cv.height = fh;
+      const ctx = cv.getContext('2d');
+      ctx.drawImage(img, fx, fy, fw, fh, 0, 0, fw, fh);
+      const data = ctx.getImageData(0, 0, fw, fh).data;
+      let minx = fw, miny = fh, maxx = -1, maxy = -1;
+      for (let y = 0; y < fh; y++) {
+        for (let x = 0; x < fw; x++) {
+          if (data[(y * fw + x) * 4 + 3] > 16) {
+            if (x < minx) minx = x;
+            if (x > maxx) maxx = x;
+            if (y < miny) miny = y;
+            if (y > maxy) maxy = y;
+          }
+        }
+      }
+      bbox = (maxx < 0)
+        ? { x: 0, y: 0, w: fw, h: fh }    // fully transparent fallback
+        : { x: minx, y: miny, w: maxx - minx + 1, h: maxy - miny + 1 };
+      tex._alphaBBoxCache[fkey] = bbox;
+    }
+    // Apply shrink % (centred) then pad px on every side.
+    const sw = Math.max(1, Math.round(bbox.w * shrink) - 2 * pad);
+    const sh = Math.max(1, Math.round(bbox.h * shrink) - 2 * pad);
+    const ox = bbox.x + Math.round((bbox.w - sw) / 2);
+    const oy = bbox.y + Math.round((bbox.h - sh) / 2);
+    obj.body.setSize(sw, sh).setOffset(ox, oy);
+    return bbox;
+  }
+
+  // ─────────────────────────────────────────────────────────────────
   //  Player / Dummy / Chest
   // ─────────────────────────────────────────────────────────────────
   createPlayer(x, y) {
@@ -816,14 +893,19 @@ class GameScene extends Phaser.Scene {
 
   createDummy(x, y) {
     const sprite = this.physics.add.sprite(x, y, 'dummy').setScale(SCALE).setImmovable(true);
-    sprite.body.setAllowGravity(false).setSize(23, 23).setOffset(2, 1);
+    sprite.body.setAllowGravity(false);
+    this._fitBodyToTexture(sprite);          // dummy fills its 27×25 frame
     const maxHp = 5;
     return { sprite, hp: maxHp, maxHp, dead: false };
   }
 
   createChest(x, y) {
     const sprite = this.physics.add.sprite(x, y, 'chest').setScale(5).setImmovable(true);
-    sprite.body.setAllowGravity(false).setSize(12, 14).setOffset(1, 1);
+    sprite.body.setAllowGravity(false);
+    // Frame 0 (closed) silhouette is 14×13 starting at y=3.  Open
+    // frame is taller (full 14×16); we don't refit on open because
+    // the chest is one-shot and refitting would jostle the body.
+    this._fitBodyToTexture(sprite, { frame: 0 });
     return { sprite, opened: false };
   }
 
@@ -1725,7 +1807,7 @@ class GameScene extends Phaser.Scene {
   // ─────────────────────────────────────────────────────────────────
   createPatrolDummy(x, y, leftBound, rightBound) {
     const sprite = this.physics.add.sprite(x, y, 'dummy').setScale(SCALE);
-    sprite.body.setSize(23, 23).setOffset(2, 1);
+    this._fitBodyToTexture(sprite);          // tight bbox matches createDummy
     // NOTE: do NOT setImmovable — static platforms are also immovable, and
     // Phaser skips separation entirely when both bodies are immovable, making
     // the dummy fall through the floor.  We re-assert velocity every frame
@@ -1793,6 +1875,12 @@ class GameScene extends Phaser.Scene {
   createPortal(x, y) {
     const sprite = this.physics.add.image(x, y, 'portal').setScale(SCALE);
     sprite.body.setImmovable(true).setAllowGravity(false);
+    // Portal artwork only fills 17×21 of the 32×32 frame (lots of
+    // empty alpha around it).  Without refit the player triggers the
+    // overlap ~7 unscaled px before they actually touch the visible
+    // portal.  shrink: 0.92 trims a sliver off each side so contact
+    // requires walking into the portal, not brushing past.
+    this._fitBodyToTexture(sprite, { shrink: 0.92 });
     // Gently bob up and down for visual feedback
     this.tweens.add({
       targets: sprite,
