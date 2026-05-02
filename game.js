@@ -515,7 +515,8 @@ class GameScene extends Phaser.Scene {
     });
     this._jumpHeld = false;
     this._spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-    this._dummyDialogTriggered = false;
+    this._dummyDialogTriggered       = false;
+    this._patrolDummyDialogTriggered = false;
 
     // ESC toggles pause
     this.input.keyboard.on('keydown-ESC', () => this.togglePause());
@@ -1088,7 +1089,26 @@ class GameScene extends Phaser.Scene {
       this._dummyDialogTriggered = true;
       this.showDialog([
         { speaker: 'dummy',  text: 'Hello.' },
-        { speaker: 'player', text: 'Hello to you, too.' },
+        { speaker: 'player', text: "Hi! I'm here to kill you." },
+        { speaker: 'dummy',  text: 'What? Why?' },
+        { speaker: 'player', text: 'Because that random sign over there says so.' },
+        { speaker: 'dummy',  text: 'Oh. OK then.' },
+      ]);
+    }
+  }
+
+  // Same pattern as _checkDummyProximity but for the patrol dummy on
+  // section 5.  Fires once when the player gets close enough; never
+  // re-triggers (and never if the dummy died first).
+  _checkPatrolDummyProximity() {
+    if (!this.patrolDummy || this.patrolDummy.dead || this._patrolDummyDialogTriggered) return;
+    const dist = Math.abs(this.player.sprite.x - this.patrolDummy.sprite.x);
+    if (dist < 200 && !this._dialog.active) {
+      this._patrolDummyDialogTriggered = true;
+      this.showDialog([
+        { speaker: 'player', text: 'How did you get so fast?!?' },
+        { speaker: 'dummy',  text: 'LOTS OF STEROIDS.' },
+        { speaker: 'player', text: 'Neat.' },
       ]);
     }
   }
@@ -1118,6 +1138,15 @@ class GameScene extends Phaser.Scene {
       { x:  880, lines: ['Press W or ↑ to jump', 'Twice to double jump'] },
       { x: 1550, lines: ['Press E or , to attack', 'Kill the training dummy'] },
       { x: 2860, lines: ['Press E or , to', 'open the chest'] },
+      // Secret-star sign — sits next to the star floating above the
+      // hidden spike pit past the portal.  Only visible to players
+      // who jump over the portal instead of stepping into it.
+      { x: 5520, lines: [
+        'You found a secret star!',
+        "There's one of these hidden",
+        'in every level. Collect',
+        'them all for a surprise!',
+      ] },
     ];
 
     this._instructionBoxes = defs.map(({ x, lines }) => {
@@ -1232,6 +1261,7 @@ class GameScene extends Phaser.Scene {
     this.updatePlayer(delta);
     this.updateDummyBar();
     this._checkDummyProximity();
+    this._checkPatrolDummyProximity();
   }
 
   // Drive the sword overlay through an asymmetric arc on each swing:

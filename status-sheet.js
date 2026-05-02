@@ -51,9 +51,15 @@
   let state = defaultSheet();
 
   function loadFromProgress() {
-    state = defaultSheet();
+    // Guests have no persisted state to load — keep whatever is in
+    // memory.  Wiping unconditionally to defaultSheet() before the
+    // currentUser() check would silently clear a guest's awarded
+    // items every time the inventory opens (and again on close,
+    // since render reads `state` and would show empty slots).
     if (typeof currentUser !== 'function') return;
     const u = currentUser();
+    if (!u) return;
+    state = defaultSheet();
     const saved = u && u.progress && u.progress.statusSheet;
     if (!saved) return;
     if (saved._schema !== SCHEMA) {
