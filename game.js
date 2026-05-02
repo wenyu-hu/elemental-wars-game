@@ -1100,10 +1100,17 @@ class GameScene extends Phaser.Scene {
   // Same pattern as _checkDummyProximity but for the patrol dummy on
   // section 5.  Fires once when the player gets close enough; never
   // re-triggers (and never if the dummy died first).
+  //
+  // Distance is 500 (vs the default 160 used for the first dummy) so
+  // the dialogue starts before pit 4 (x=3600–3792) — at ~x=3532 —
+  // giving the player time to read and dismiss before reaching the
+  // pit edge or the dummy itself.  Use 160 as the default for any
+  // future dialogue triggers, and only bump it when the NPC is
+  // behind an obstacle the player must cross first.
   _checkPatrolDummyProximity() {
     if (!this.patrolDummy || this.patrolDummy.dead || this._patrolDummyDialogTriggered) return;
     const dist = Math.abs(this.player.sprite.x - this.patrolDummy.sprite.x);
-    if (dist < 200 && !this._dialog.active) {
+    if (dist < 500 && !this._dialog.active) {
       this._patrolDummyDialogTriggered = true;
       this.showDialog([
         { speaker: 'player', text: 'How did you get so fast?!?' },
