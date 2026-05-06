@@ -392,8 +392,28 @@ class MenuScene extends Phaser.Scene {
 class GameScene extends Phaser.Scene {
   constructor() { super('GameScene'); }
 
+  // Phaser passes the data object from `scene.start('GameScene', data)`
+  // here before create().  Defaults to level 1 when launched without
+  // data (keyboard fallbacks in MapScene, dev-tool calls, etc).
+  //
+  // Phaser reuses the scene instance across runs, so explicit null-out
+  // any per-run entity references that some levels skip — otherwise
+  // a level-2 run inherits stale `this.dummy` etc. from a prior
+  // level-1 run, and the `if (this.entity)` guards in create() pass
+  // truthily on dangling sprites.
+  init(data) {
+    this._levelNum = (data && Number(data.level)) || 1;
+    this.dummy        = null;
+    this.chest        = null;
+    this.patrolDummy  = null;
+    this.portal       = null;
+    this._starSprite  = null;
+  }
+
   create() {
-    const WORLD_W   = 5800;
+    // World width is per-level; height is shared so the camera and
+    // floor math stays consistent across tutorials.
+    const WORLD_W   = (this._levelNum === 2) ? 2880 : 5800;
     const WORLD_H   = 1200;
     const floorY    = WORLD_H - 4 * TS;       // grass tile centre  y = 816
     const groundTop = floorY - TS / 2;         // grass surface      y = 768
@@ -436,59 +456,67 @@ class GameScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(0xeef8ff);
     this.addBackground(WORLD_W, WORLD_H);
 
-    // Level + entities
+    // Level terrain + spike pits
     this.platforms = this.physics.add.staticGroup();
-    this.buildLevel(WORLD_W, WORLD_H, floorY);
+    this.spikes    = this.physics.add.staticGroup();
+    if (this._levelNum === 2) {
+      this._buildLevel2(WORLD_W, WORLD_H, floorY);
+    } else {
+      this.buildLevel(WORLD_W, WORLD_H, floorY);
+      this.buildSpikes(floorY);
+    }
 
-    this.player     = this.createPlayer(this._respawnX, this._respawnY);
-    this.dummy      = this.createDummy(1800, groundTop - 25 * SCALE / 2);
-    this.chest      = this.createChest(3000, groundTop - 16 * 5 / 2);   // scale=5 used below
-    // Patrol section 5: tiles 40-44, x=3840-4224, bordered by pit 4 (3600-3792) + pit 5 (4272-4464)
-    this.patrolDummy = this.createPatrolDummy(
-      4032, groundTop - 25 * SCALE / 2,   // spawn at centre of section 5
-      3830, 4250                            // hard-clamp limits (see updatePatrolDummy)
-    );
-    // Portal — at the far end of section 6 (tiles 47-51)
-    // portal.png is 32×32 px; at SCALE=3 → 96×96 display, centre at groundTop-48
-    this.portal = this.createPortal(4750, groundTop - 32 * SCALE / 2);
-
-    this.spikes = this.physics.add.staticGroup();
-    this.buildSpikes(floorY);
-
-    // Colliders
+    this.player = this.createPlayer(this._respawnX, this._respawnY);
     this.physics.add.collider(this.player.sprite, this.platforms);
-    this.physics.add.collider(this.dummy.sprite,  this.platforms);
-    this.physics.add.collider(this.chest.sprite,  this.platforms);
-    this.physics.add.collider(this.patrolDummy.sprite, this.platforms);
-
-    // Make dummy and chest solid — without these the player passes right through
-    this.physics.add.collider(this.player.sprite, this.dummy.sprite);
-    this.physics.add.collider(this.player.sprite, this.chest.sprite);
-    // Patrol dummy is solid and can push the player off the platform
-    this.physics.add.collider(this.player.sprite, this.patrolDummy.sprite);
     this.physics.add.overlap(
       this.player.sprite, this.spikes,
       () => this.hitBySpikes(), null, this
     );
-    this.physics.add.overlap(
-      this.player.sprite, this.portal,
-      () => this.reachPortal(), null, this
-    );
 
-    // ── Secret star ───────────────────────────────────────────────────
-    // Floats above the hidden spike pit after the portal.
-    // x=5520 = centre of pit (5424-5616), y=688 = groundTop-80 (1 tile up).
-    // Not visible from the portal (pit left edge 5424 is off-screen at zoom 0.65).
-    this._starOrigY  = groundTop - 80;   // 688
-    this._starSprite = this.physics.add.image(5520, this._starOrigY, 'star');
-    this._starSprite.setScale(SCALE);
-    this._starSprite.setDepth(10);
-    this._starSprite.body.setAllowGravity(false);
-    this._startStarBob();
-    this.physics.add.overlap(
-      this.player.sprite, this._starSprite,
-      () => this.collectStar(), null, this
-    );
+    // Per-level entities — only level 1 has them populated for now.
+    // Level 2 is terrain-only while the user iterates on pixel art for
+    // the rest of the level; each conditional below is a no-op there.
+    if (this._levelNum === 1) {
+      this.dummy      = this.createDummy(1800, groundTop - 25 * SCALE / 2);
+      this.chest      = this.createChest(3000, groundTop - 16 * 5 / 2);   // scale=5 used below
+      // Patrol section 5: tiles 40-44, x=3840-4224, bordered by pit 4 (3600-3792) + pit 5 (4272-4464)
+      this.patrolDummy = this.createPatrolDummy(
+        4032, groundTop - 25 * SCALE / 2,   // spawn at centre of section 5
+        3830, 4250                            // hard-clamp limits (see updatePatrolDummy)
+      );
+      // Portal — at the far end of section 6 (tiles 47-51)
+      // portal.png is 32×32 px; at SCALE=3 → 96×96 display, centre at groundTop-48
+      this.portal = this.createPortal(4750, groundTop - 32 * SCALE / 2);
+
+      this.physics.add.collider(this.dummy.sprite,  this.platforms);
+      this.physics.add.collider(this.chest.sprite,  this.platforms);
+      this.physics.add.collider(this.patrolDummy.sprite, this.platforms);
+
+      // Make dummy and chest solid — without these the player passes right through
+      this.physics.add.collider(this.player.sprite, this.dummy.sprite);
+      this.physics.add.collider(this.player.sprite, this.chest.sprite);
+      // Patrol dummy is solid and can push the player off the platform
+      this.physics.add.collider(this.player.sprite, this.patrolDummy.sprite);
+      this.physics.add.overlap(
+        this.player.sprite, this.portal,
+        () => this.reachPortal(), null, this
+      );
+
+      // ── Secret star ───────────────────────────────────────────────────
+      // Floats above the hidden spike pit after the portal.
+      // x=5520 = centre of pit (5424-5616), y=688 = groundTop-80 (1 tile up).
+      // Not visible from the portal (pit left edge 5424 is off-screen at zoom 0.65).
+      this._starOrigY  = groundTop - 80;   // 688
+      this._starSprite = this.physics.add.image(5520, this._starOrigY, 'star');
+      this._starSprite.setScale(SCALE);
+      this._starSprite.setDepth(10);
+      this._starSprite.body.setAllowGravity(false);
+      this._startStarBob();
+      this.physics.add.overlap(
+        this.player.sprite, this._starSprite,
+        () => this.collectStar(), null, this
+      );
+    }
 
     // ── Camera ───────────────────────────────────────────────────────
     // followOffset(0, +181): Phaser subtracts the offset from the target,
@@ -528,8 +556,8 @@ class GameScene extends Phaser.Scene {
 
     this.buildAnims();
     this.player.sprite.anims.play('idle', true);
-    this.dummy.sprite.anims.play('dummy_idle', true);
-    this.chest.sprite.anims.play('chest_closed', true);
+    if (this.dummy) this.dummy.sprite.anims.play('dummy_idle', true);
+    if (this.chest) this.chest.sprite.anims.play('chest_closed', true);
     this.buildHUD();
 
     this.buildDialogBox();
@@ -647,6 +675,78 @@ class GameScene extends Phaser.Scene {
         s.refreshBody();
       }
     });
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  //  Tutorial Level 2 — terrain only (entities arrive in later passes)
+  //
+  //  Layout (TS = 96 px):
+  //    Tile  0 –  2  spawn ground @ floor level (player starts here)
+  //    Tile  3 – 29  giant spike pit covering the entire floor
+  //    Tile 14 – 29  elevated "top" safe ground at floor − 4·TS
+  //
+  //  Five floating platforms form an ascending bridge from spawn up
+  //  to the top safe ground.  Each step is 2 tiles right + 1 tile up
+  //  (well within a single jump's reach), and the top two platforms
+  //  share the top-ground elevation so the final transition is a
+  //  flat hop instead of a precision landing.
+  //
+  //  World ends at tile 30 (WORLD_W = 2880).  No portal, dummies, or
+  //  chest yet — those will be added once the user finishes their
+  //  pixel-art pass for level 2.
+  // ─────────────────────────────────────────────────────────────────
+  _buildLevel2(worldW, worldH, floorY) {
+    const grass = (startX, cols, y) => {
+      for (let i = 0; i < cols; i++) {
+        this.platforms.create(startX + i * TS, y, 'ground').setScale(SCALE).refreshBody();
+      }
+    };
+    const dirtRow = (y, cols) => {
+      for (let i = 0; i < cols; i++) {
+        this.platforms.create(i * TS, y, 'dirt').setScale(SCALE).refreshBody();
+      }
+    };
+    const plat = (x, y) =>
+      this.platforms.create(x, y, 'platform').setScale(SCALE).refreshBody();
+
+    // Spawn ground (3 tiles at floor level)
+    grass(0, 3, floorY);
+
+    // Top safe ground (16 tiles, 4 tiles above the floor)
+    const topY = floorY - 4 * TS;
+    grass(14 * TS, 16, topY);
+
+    // Underground dirt fills the same 4 rows as level 1 so the pit
+    // bottom matches and spike Y math (buildSpikes) carries over.
+    const totalCols = Math.ceil(worldW / TS) + 1;
+    for (let row = 1; row <= 4; row++) dirtRow(floorY + row * TS, totalCols);
+
+    // Ascending bridge: P1→P5
+    plat( 5 * TS, floorY - 1 * TS);   // P1
+    plat( 7 * TS, floorY - 2 * TS);   // P2
+    plat( 9 * TS, floorY - 3 * TS);   // P3
+    plat(11 * TS, floorY - 4 * TS);   // P4 — first platform at top elevation
+    plat(13 * TS, floorY - 4 * TS);   // P5 — flat hop onto top safe ground
+
+    // Spike floor across the entire pit (tiles 3–29).  Reuses the
+    // exact spike-placement logic from buildSpikes so the body
+    // offsets / scale stay consistent.
+    this._buildSpikesLevel2(floorY);
+  }
+
+  _buildSpikesLevel2(floorY) {
+    const SW = 8 * SCALE;                    // spike width  = 24
+    const SH = 8 * SCALE;                    // spike height = 24
+    const pitFloor = floorY + TS / 2;        // top of dirt row 1
+    const spikeY   = pitFloor - SH / 2;
+    const left  =  3 * TS;                   // pit starts right after spawn
+    const right = 30 * TS;                   // covers the rest of the world
+    for (let x = left + SW / 2; x < right; x += SW) {
+      const s = this.spikes.create(x, spikeY, 'spike');
+      s.setScale(SCALE);
+      s.body.setSize(6, 6).setOffset(1, 0);
+      s.refreshBody();
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -1074,7 +1174,7 @@ class GameScene extends Phaser.Scene {
 
   // Show proximity prompt above dummy head; auto-trigger dialog on first approach
   _checkDummyProximity() {
-    if (this.dummy.dead || this._dummyDialogTriggered) {
+    if (!this.dummy || this.dummy.dead || this._dummyDialogTriggered) {
       this._dialog.prompt.setVisible(false);
       return;
     }
@@ -1140,21 +1240,28 @@ class GameScene extends Phaser.Scene {
     const FONT = 20;                     // world-space font size
     const LS   = 6;                      // extra line-spacing
 
-    const defs = [
-      { x:  280, lines: ['Use WASD or arrow keys', 'to move'] },
-      { x:  880, lines: ['Press W or ↑ to jump', 'Twice to double jump'] },
-      { x: 1550, lines: ['Press E or , to attack', 'Kill the training dummy'] },
-      { x: 2860, lines: ['Press E or , to', 'open the chest'] },
-      // Secret-star sign — sits next to the star floating above the
-      // hidden spike pit past the portal.  Only visible to players
-      // who jump over the portal instead of stepping into it.
-      { x: 5520, lines: [
-        'You found a secret star!',
-        "There's one of these hidden",
-        'in every level. Collect',
-        'them all for a surprise!',
-      ] },
-    ];
+    // Each level has its own set of signs.  Level 2 currently ships
+    // with no signs — they'll be added as the user finishes pixel art
+    // for the rest of the level.
+    const defsByLevel = {
+      1: [
+        { x:  280, lines: ['Use WASD or arrow keys', 'to move'] },
+        { x:  880, lines: ['Press W or ↑ to jump', 'Twice to double jump'] },
+        { x: 1550, lines: ['Press E or , to attack', 'Kill the training dummy'] },
+        { x: 2860, lines: ['Press E or , to', 'open the chest'] },
+        // Secret-star sign — sits next to the star floating above the
+        // hidden spike pit past the portal.  Only visible to players
+        // who jump over the portal instead of stepping into it.
+        { x: 5520, lines: [
+          'You found a secret star!',
+          "There's one of these hidden",
+          'in every level. Collect',
+          'them all for a surprise!',
+        ] },
+      ],
+      2: [],
+    };
+    const defs = defsByLevel[this._levelNum] || [];
 
     this._instructionBoxes = defs.map(({ x, lines }) => {
       // Size the box to the text
@@ -1200,18 +1307,22 @@ class GameScene extends Phaser.Scene {
   //  HUD
   // ─────────────────────────────────────────────────────────────────
   buildHUD() {
-    const barBg    = this.add.rectangle(0, 0, 80, 10, 0x220000).setOrigin(0.5, 1);
-    const barFg    = this.add.rectangle(0, 0, 80, 10, 0xff3333).setOrigin(0,   1);
+    // Pre-create both dummy HP bar widgets up front; visibility is
+    // toggled per-tick in updateDummyBar.  On levels without a dummy
+    // (e.g. level 2) the bars stay hidden because their owners are
+    // never set to !dead.
+    const barBg    = this.add.rectangle(0, 0, 80, 10, 0x220000).setOrigin(0.5, 1).setVisible(false);
+    const barFg    = this.add.rectangle(0, 0, 80, 10, 0xff3333).setOrigin(0,   1).setVisible(false);
     const barLabel = this.add.text(0, 0, '', {
       fontSize: '9px', fontFamily: 'monospace', color: '#ffbbbb'
-    }).setOrigin(0.5, 1);
+    }).setOrigin(0.5, 1).setVisible(false);
     this.dummyBar = { bg: barBg, fg: barFg, label: barLabel };
 
-    const pBarBg    = this.add.rectangle(0, 0, 80, 10, 0x220000).setOrigin(0.5, 1);
-    const pBarFg    = this.add.rectangle(0, 0, 80, 10, 0xff3333).setOrigin(0,   1);
+    const pBarBg    = this.add.rectangle(0, 0, 80, 10, 0x220000).setOrigin(0.5, 1).setVisible(false);
+    const pBarFg    = this.add.rectangle(0, 0, 80, 10, 0xff3333).setOrigin(0,   1).setVisible(false);
     const pBarLabel = this.add.text(0, 0, '', {
       fontSize: '9px', fontFamily: 'monospace', color: '#ffbbbb'
-    }).setOrigin(0.5, 1);
+    }).setOrigin(0.5, 1).setVisible(false);
     this.patrolDummyBar = { bg: pBarBg, fg: pBarFg, label: pBarLabel };
 
     const { width, height } = this.scale;
@@ -1536,20 +1647,20 @@ class GameScene extends Phaser.Scene {
   }
 
   updateDummyBar() {
-    if (!this.dummy.dead) {
+    if (this.dummy && !this.dummy.dead) {
       const ds = this.dummy.sprite, bar = this.dummyBar, barW = 80;
       const bx = ds.x, by = ds.y - 25*SCALE/2 - 8;
-      bar.bg.setPosition(bx, by).setSize(barW, 10);
-      bar.fg.setPosition(bx - barW/2, by).setSize(barW * this.dummy.hp / this.dummy.maxHp, 10);
-      bar.label.setPosition(bx, by-10).setText(`HP: ${this.dummy.hp} / ${this.dummy.maxHp}`);
+      bar.bg.setPosition(bx, by).setSize(barW, 10).setVisible(true);
+      bar.fg.setPosition(bx - barW/2, by).setSize(barW * this.dummy.hp / this.dummy.maxHp, 10).setVisible(true);
+      bar.label.setPosition(bx, by-10).setText(`HP: ${this.dummy.hp} / ${this.dummy.maxHp}`).setVisible(true);
     }
     const pd = this.patrolDummy;
     if (pd && !pd.dead && pd.sprite?.active) {
       const ds = pd.sprite, bar = this.patrolDummyBar, barW = 80;
       const bx = ds.x, by = ds.y - 25*SCALE/2 - 8;
-      bar.bg.setPosition(bx, by).setSize(barW, 10);
-      bar.fg.setPosition(bx - barW/2, by).setSize(barW * pd.hp / pd.maxHp, 10);
-      bar.label.setPosition(bx, by-10).setText(`HP: ${pd.hp} / ${pd.maxHp}`);
+      bar.bg.setPosition(bx, by).setSize(barW, 10).setVisible(true);
+      bar.fg.setPosition(bx - barW/2, by).setSize(barW * pd.hp / pd.maxHp, 10).setVisible(true);
+      bar.label.setPosition(bx, by-10).setText(`HP: ${pd.hp} / ${pd.maxHp}`).setVisible(true);
     }
   }
 
@@ -2008,6 +2119,8 @@ class MapScene extends Phaser.Scene {
     // ── Read completion state ──────────────────────────────────────
     const lvl1Done = this.registry.get('level1Complete') || false;
     const lvl1Star = this.registry.get('level1Star')     || false;
+    const lvl2Done = this.registry.get('level2Complete') || false;
+    const lvl2Star = this.registry.get('level2Star')     || false;
 
     // ── Connecting dashed path ────────────────────────────────────
     const pathGfx = this.add.graphics();
@@ -2017,11 +2130,15 @@ class MapScene extends Phaser.Scene {
     }
 
     // ── Level nodes ────────────────────────────────────────────────
+    // Level n unlocks when level (n-1) is complete.  Currently only
+    // levels 1 and 2 have content; the rest stay locked.
+    const doneByLevel = { 1: lvl1Done, 2: lvl2Done };
+    const starByLevel = { 1: lvl1Star, 2: lvl2Star };
     lvPos.forEach((p, i) => {
       const n        = i + 1;
-      const unlocked = n === 1;
-      const done     = n === 1 && lvl1Done;
-      const star     = n === 1 && lvl1Star;
+      const unlocked = (n === 1) || (n === 2 && lvl1Done);
+      const done     = !!doneByLevel[n];
+      const star     = !!starByLevel[n];
       this._node(p.x, p.y, n, unlocked, done, star);
     });
 
@@ -2034,10 +2151,13 @@ class MapScene extends Phaser.Scene {
     back.on('pointerout',  () => back.setAlpha(1.00));
     back.on('pointerdown', () => this.scene.start('MenuScene'));
 
-    // ── Keyboard fallback: press 1 or ENTER to start Level 1 ──────
-    this.input.keyboard.once('keydown-ONE',   () => this.scene.start('GameScene'));
-    this.input.keyboard.once('keydown-ENTER', () => this.scene.start('GameScene'));
-    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene'));
+    // ── Keyboard fallbacks: 1/ENTER/SPACE → level 1, 2 → level 2 ───
+    this.input.keyboard.once('keydown-ONE',   () => this.scene.start('GameScene', { level: 1 }));
+    this.input.keyboard.once('keydown-ENTER', () => this.scene.start('GameScene', { level: 1 }));
+    this.input.keyboard.once('keydown-SPACE', () => this.scene.start('GameScene', { level: 1 }));
+    if (lvl1Done) {
+      this.input.keyboard.once('keydown-TWO', () => this.scene.start('GameScene', { level: 2 }));
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────────────────
@@ -2091,7 +2211,7 @@ class MapScene extends Phaser.Scene {
       lbl.on('pointerup', () => {
         console.log('[MapScene] Level', n, 'clicked → starting GameScene');
         try {
-          this.scene.start('GameScene');
+          this.scene.start('GameScene', { level: n });
         } catch (e) {
           console.error('[MapScene] scene.start threw:', e);
         }

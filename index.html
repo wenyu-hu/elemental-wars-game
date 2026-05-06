@@ -10,8 +10,19 @@
 <body>
   <div id="game-container"></div>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
-  <script src="items.js"></script>
-  <script src="status-sheet.js"></script>
-  <script src="game.js"></script>
+  <script>
+    // Cache-bust local sources so the dev server's no-cache-headers
+    // setup doesn't serve stale JS to the browser.  No-op in
+    // production where files would be hashed/versioned anyway.
+    (function () {
+      const v = String(Date.now());
+      ['items.js', 'status-sheet.js', 'game.js'].forEach(src => {
+        const s = document.createElement('script');
+        s.src = src + '?v=' + v;
+        s.async = false;
+        document.body.appendChild(s);
+      });
+    })();
+  </script>
 </body>
 </html>
