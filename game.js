@@ -224,13 +224,24 @@ class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('player_duck',   'assets/duck.png',   { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('dummy',         'assets/dummy.png',  { frameWidth: 27, frameHeight: 25 });
     this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 14, frameHeight: 16 });
-    this.load.image('item_wooden_sword', 'assets/Sword.png');
+    this.load.image('item_wooden_sword',  'assets/Sword.png');
+    this.load.image('item_wooden_shield', 'assets/Shield.png');
     this.load.image('ground',   'assets/ground.png');
     this.load.image('dirt',     'assets/dirt.png');
     this.load.image('platform', 'assets/platform.png');
     this.load.image('spike',    'assets/spike.png');
     this.load.image('portal',   'assets/portal.png');
     this.load.image('star',     'assets/star.png');
+    // Level 2 — ranged dummy + element projectiles + moving platform
+    this.load.image('ranged_dummy',    'assets/Ranged_Dummy.png');
+    this.load.image('moving_platform', 'assets/New Piskel.png');
+    this.load.image('shield_overlay',  'assets/Shield.png');
+    this.load.spritesheet('blue_fireball', 'assets/Blue_Fireball.png', { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('bow',           'assets/Bow.png',           { frameWidth: 32, frameHeight: 32 });
+    this.load.image('proj_fire',  'assets/Fireball.png');
+    this.load.image('proj_water', 'assets/Wave-1.png.png');
+    this.load.image('proj_air',   'assets/Air-1.png.png');
+    this.load.image('proj_earth', 'assets/Crack-1.png.png');
   }
 
   create() {
@@ -278,6 +289,15 @@ class PreloadScene extends Phaser.Scene {
     makeImg  ('dust',          0xd4c4a8,  4,  4);
     makeImg  ('portal',        0x00ddff, 32, 32);   // portal fallback
     makeImg  ('star',          0xf5c518, 14, 14);  // star fallback
+    makeImg  ('ranged_dummy',    0xaa3344, 32, 32);
+    makeImg  ('moving_platform', 0x8b5e3c, 32, 12);
+    makeImg  ('shield_overlay',  0x886633, 32, 32);
+    makeSheet('blue_fireball', 0x44aaff, 2, 32, 32);
+    makeSheet('bow',           0x884422, 2, 32, 32);
+    makeImg  ('proj_fire',     0xff5522, 16, 16);
+    makeImg  ('proj_water',    0x3399ff, 32, 32);
+    makeImg  ('proj_air',      0xffffff, 32, 32);
+    makeImg  ('proj_earth',    0x77aa44, 32, 32);
   }
 }
 
@@ -408,12 +428,20 @@ class GameScene extends Phaser.Scene {
     this.patrolDummy  = null;
     this.portal       = null;
     this._starSprite  = null;
+    // Level-2 entity refs (null on level 1 so collider/overlap guards skip)
+    this.rangedDummies = null;     // array of { sprite, hp, maxHp, dead, fireTimer }
+    this.fireballs     = null;     // physics group — enemy projectiles
+    this.elementProjectiles = null;// physics group — player element shots
+    this.chestL2A      = null;     // first chest (shield + element-pick)
+    this.chestL2B      = null;     // second chest (checkpoint)
+    this.movingPlatform = null;    // moving platform sprite
+    this._level2Complete = false;
   }
 
   create() {
     // World width is per-level; height is shared so the camera and
     // floor math stays consistent across tutorials.
-    const WORLD_W   = (this._levelNum === 2) ? 2880 : 5800;
+    const WORLD_W   = (this._levelNum === 2) ? 6336 : 5800;
     const WORLD_H   = 1200;
     const floorY    = WORLD_H - 4 * TS;       // grass tile centre  y = 816
     const groundTop = floorY - TS / 2;         // grass surface      y = 768
@@ -451,6 +479,14 @@ class GameScene extends Phaser.Scene {
         saveProgress({ xp: this._xp, xpMigratedFromChest: true });
       }
     }
+
+    // Selected primary element (Fire/Water/Air/Earth). Empty until the
+    // L2 first-chest level-up cinematic, then persists across runs.
+    this._element = _saved.element || '';
+    // Block state — set true while the player holds T or '/'
+    this._blocking = false;
+    // Per-element cooldowns so the player can't spam
+    this._elementCooldown = 0;
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
     this.cameras.main.setBackgroundColor(0xeef8ff);
@@ -516,6 +552,8 @@ class GameScene extends Phaser.Scene {
         this.player.sprite, this._starSprite,
         () => this.collectStar(), null, this
       );
+    } else if (this._levelNum === 2) {
+      this._buildLevel2Entities(floorY, groundTop);
     }
 
     // ── Camera ───────────────────────────────────────────────────────
@@ -540,9 +578,21 @@ class GameScene extends Phaser.Scene {
       s: Phaser.Input.Keyboard.KeyCodes.S,
       e: Phaser.Input.Keyboard.KeyCodes.E,
       comma: Phaser.Input.Keyboard.KeyCodes.COMMA,
+      t: Phaser.Input.Keyboard.KeyCodes.T,
+      slash: Phaser.Input.Keyboard.KeyCodes.FORWARD_SLASH,
+      one: Phaser.Input.Keyboard.KeyCodes.ONE,
     });
     this._jumpHeld = false;
     this._spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    // Mouse click fires the selected element (level 2).  Set an
+    // edge-flag here, consumed once per frame in _tryFireElement, so a
+    // single click maps to a single shot regardless of frame timing.
+    this._firePointerQueued = false;
+    this.input.on('pointerdown', () => {
+      if (this._dialog && this._dialog.active) return;
+      if (this._chestSequenceActive || this._portalReached) return;
+      this._firePointerQueued = true;
+    });
     this._dummyDialogTriggered       = false;
     this._patrolDummyDialogTriggered = false;
 
@@ -558,6 +608,8 @@ class GameScene extends Phaser.Scene {
     this.player.sprite.anims.play('idle', true);
     if (this.dummy) this.dummy.sprite.anims.play('dummy_idle', true);
     if (this.chest) this.chest.sprite.anims.play('chest_closed', true);
+    if (this.chestL2A) this.chestL2A.sprite.anims.play('chest_closed', true);
+    if (this.chestL2B) this.chestL2B.sprite.anims.play('chest_closed', true);
     this.buildHUD();
 
     this.buildDialogBox();
@@ -678,22 +730,21 @@ class GameScene extends Phaser.Scene {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  //  Tutorial Level 2 — terrain only (entities arrive in later passes)
+  //  Level 2 layout (TS = 96 px, worldW = 6336 = 66 tiles)
   //
-  //  Layout (TS = 96 px):
-  //    Tile  0 –  2  spawn ground @ floor level (player starts here)
-  //    Tile  3 – 29  giant spike pit covering the entire floor
-  //    Tile 14 – 29  elevated "top" safe ground at floor − 4·TS
-  //
-  //  Five floating platforms form an ascending bridge from spawn up
-  //  to the top safe ground.  Each step is 2 tiles right + 1 tile up
-  //  (well within a single jump's reach), and the top two platforms
-  //  share the top-ground elevation so the final transition is a
-  //  flat hop instead of a precision landing.
-  //
-  //  World ends at tile 30 (WORLD_W = 2880).  No portal, dummies, or
-  //  chest yet — those will be added once the user finishes their
-  //  pixel-art pass for level 2.
+  //  Sections (left → right):
+  //    0–2    spawn ground (floor level)
+  //    3–13   giant spike pit + 5-step ascending bridge up to the top
+  //    14–29  top safe ground (16 tiles), upper section content:
+  //             Ranged Dummy 1, duck sign, 3 overhead spike platforms
+  //             (must crouch under), Chest #1 (checkpoint)
+  //    30–32  WIDE spike pit at TOP elevation → precision jump
+  //    33–38  top safe ground (post-jump landing)
+  //    33–49  floor-level ground sits directly BELOW 33–49 so the player
+  //           can safely drop off the right edge of the top landing.
+  //           Drop area holds Ranged Dummy 2 + block sign.
+  //    50–52  small spike pit at floor, crossed via the Moving Platform
+  //    53–65  floor-level ground: Chest #2 (checkpoint) + portal at end
   // ─────────────────────────────────────────────────────────────────
   _buildLevel2(worldW, worldH, floorY) {
     const grass = (startX, cols, y) => {
@@ -709,44 +760,216 @@ class GameScene extends Phaser.Scene {
     const plat = (x, y) =>
       this.platforms.create(x, y, 'platform').setScale(SCALE).refreshBody();
 
-    // Spawn ground (3 tiles at floor level)
-    grass(0, 3, floorY);
-
-    // Top safe ground (16 tiles, 4 tiles above the floor)
     const topY = floorY - 4 * TS;
-    grass(14 * TS, 16, topY);
 
-    // Underground dirt fills the same 4 rows as level 1 so the pit
-    // bottom matches and spike Y math (buildSpikes) carries over.
+    // Floor-level grass
+    grass(0, 3, floorY);                 // spawn      (tiles 0–2)
+    grass(33 * TS, 17, floorY);          // drop area  (tiles 33–49) — safe drop
+    grass(53 * TS, 13, floorY);          // chest 2    (tiles 53–65)
+
+    // Top-level grass
+    grass(14 * TS, 16, topY);            // top safe A (tiles 14–29)
+    grass(33 * TS,  6, topY);            // top safe B (tiles 33–38), post-jump
+
+    // Underground dirt — full width
     const totalCols = Math.ceil(worldW / TS) + 1;
     for (let row = 1; row <= 4; row++) dirtRow(floorY + row * TS, totalCols);
 
-    // Ascending bridge: P1→P5
-    plat( 5 * TS, floorY - 1 * TS);   // P1
-    plat( 7 * TS, floorY - 2 * TS);   // P2
-    plat( 9 * TS, floorY - 3 * TS);   // P3
-    plat(11 * TS, floorY - 4 * TS);   // P4 — first platform at top elevation
-    plat(13 * TS, floorY - 4 * TS);   // P5 — flat hop onto top safe ground
+    // Ascending bridge over the giant spike pit
+    plat( 5 * TS, floorY - 1 * TS);
+    plat( 7 * TS, floorY - 2 * TS);
+    plat( 9 * TS, floorY - 3 * TS);
+    plat(11 * TS, floorY - 4 * TS);
+    plat(13 * TS, floorY - 4 * TS);
 
-    // Spike floor across the entire pit (tiles 3–29).  Reuses the
-    // exact spike-placement logic from buildSpikes so the body
-    // offsets / scale stay consistent.
-    this._buildSpikesLevel2(floorY);
+    // ── Three "duck-under" overhead platforms ────────────────────
+    // Heights derived from the player's standing vs crouched body so
+    // a standing player is blocked but a crouched one (body shrinks to
+    // 14·SCALE tall in updatePlayer) slips under.  Each platform also
+    // carries a row of spikes on its TOP surface, punishing any jump.
+    const surfaceY    = topY - TS / 2;          // top-safe walking surface
+    const standHead   = surfaceY - 27 * SCALE;  // standing body top
+    const crouchHead  = surfaceY - 14 * SCALE;  // crouched body top
+    // platBottom must satisfy standHead < platTop (block) and
+    // crouchHead > platBottom (clear); pick the midpoint of the valid
+    // window (standHead+18, crouchHead).
+    const platBottom  = (standHead + 18 + crouchHead) / 2;
+    const overheadY   = platBottom - 9;         // platform is 18px tall
+    const overheadXs  = [20 * TS, 23 * TS, 26 * TS];
+    overheadXs.forEach(px => plat(px, overheadY));
+
+    this._buildSpikesLevel2(floorY, overheadXs, overheadY);
   }
 
-  _buildSpikesLevel2(floorY) {
-    const SW = 8 * SCALE;                    // spike width  = 24
-    const SH = 8 * SCALE;                    // spike height = 24
-    const pitFloor = floorY + TS / 2;        // top of dirt row 1
-    const spikeY   = pitFloor - SH / 2;
-    const left  =  3 * TS;                   // pit starts right after spawn
-    const right = 30 * TS;                   // covers the rest of the world
-    for (let x = left + SW / 2; x < right; x += SW) {
-      const s = this.spikes.create(x, spikeY, 'spike');
-      s.setScale(SCALE);
-      s.body.setSize(6, 6).setOffset(1, 0);
-      s.refreshBody();
+  _buildSpikesLevel2(floorY, overheadXs, overheadY) {
+    const SW = 8 * SCALE;
+    const SH = 8 * SCALE;
+    const pitFloor  = floorY + TS / 2;
+    const spikeY    = pitFloor - SH / 2;
+
+    const addRow = (left, right, y) => {
+      for (let x = left + SW / 2; x < right; x += SW) {
+        const s = this.spikes.create(x, y, 'spike');
+        s.setScale(SCALE);
+        s.body.setSize(6, 6).setOffset(1, 0);
+        s.refreshBody();
+      }
+    };
+
+    // Floor-level spike rows.  The giant pit runs from just past spawn
+    // to the left edge of the drop-area grass (tile 33), so the wide
+    // TOP-elevation gap over tiles 30–32 is itself a spike pit: failing
+    // the precision jump drops the player four tiles onto these spikes.
+    addRow(2 * TS + TS / 2, 33 * TS - TS / 2, spikeY);   // giant pit
+    addRow(49 * TS + TS / 2, 52 * TS + TS / 2, spikeY);  // small pit before chest 2
+
+    // Spikes on TOP of each overhead duck-under platform (96px wide).
+    const platTop      = overheadY - 9;
+    const spikeOnPlatY = platTop - SH / 2;
+    overheadXs.forEach(px => addRow(px - TS / 2, px + TS / 2, spikeOnPlatY));
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  //  Level 2 entities — ranged dummies, chests, moving platform
+  //
+  //  Spawned only on level 2 (level 1 has its own dispatch in create).
+  //  All references are stored on `this` so update loop / overlap
+  //  handlers can find them.
+  // ─────────────────────────────────────────────────────────────────
+  _buildLevel2Entities(floorY, groundTop) {
+    const topY    = floorY - 4 * TS;
+    const topSurf = topY - TS / 2;       // top-safe surface y
+    const floorSurf = groundTop;          // floor surface y (= 768)
+
+    // ── Projectile groups ────────────────────────────────────────
+    this.fireballs = this.physics.add.group({ allowGravity: false });
+    this.elementProjectiles = this.physics.add.group({ allowGravity: false });
+
+    // ── Ranged dummies ───────────────────────────────────────────
+    // Dummy 1 — far end of top safe A, before the overhead platforms.
+    //   Sprite 32×32, scale 3 → 96×96.  Sitting on top-safe surface
+    //   means centre y = topSurf - 48.
+    const rd1 = this._createRangedDummy(17 * TS, topSurf - 48);
+    // Dummy 2 — on floor-level drop area
+    const rd2 = this._createRangedDummy(46 * TS, floorSurf - 48);
+    this.rangedDummies = [rd1, rd2];
+
+    // Colliders so dummies sit on terrain (gravity-allowing → they
+    // settle on whichever platform their spawn Y is above).
+    this.rangedDummies.forEach(rd => {
+      this.physics.add.collider(rd.sprite, this.platforms);
+      this.physics.add.collider(this.player.sprite, rd.sprite);
+    });
+
+    // Enemy fireballs damage the player on overlap
+    this.physics.add.overlap(
+      this.player.sprite, this.fireballs,
+      (_p, fb) => this._onPlayerHitByFireball(fb), null, this
+    );
+    // Player element shots damage ranged dummies
+    this.rangedDummies.forEach(rd => {
+      this.physics.add.overlap(
+        rd.sprite, this.elementProjectiles,
+        (sp, pr) => this._onElementHitDummy(rd, pr), null, this
+      );
+    });
+
+    // ── Chest #1 (checkpoint) ────────────────────────────────────
+    // Sits at end of top safe A (tile 28), just before the wide gap.
+    this.chestL2A = this._createChestL2(28 * TS, topSurf - 40, 'A');
+    this.physics.add.collider(this.chestL2A.sprite, this.platforms);
+    this.physics.add.collider(this.player.sprite, this.chestL2A.sprite);
+
+    // ── Chest #2 (checkpoint, far end) ───────────────────────────
+    this.chestL2B = this._createChestL2(62 * TS, floorSurf - 40, 'B');
+    this.physics.add.collider(this.chestL2B.sprite, this.platforms);
+    this.physics.add.collider(this.player.sprite, this.chestL2B.sprite);
+
+    // ── Moving platform across the small spike pit (tiles 50–52) ─
+    //   Pit covers x = 50·TS → 53·TS = 4800 → 5088.
+    //   Platform travels horizontally between x=4800 and x=5088.
+    //   Speed = 90 px/s (moderate steady pace).
+    const mpY = floorSurf - 30;
+    this.movingPlatform = this._createMovingPlatform(4900, mpY, 4800, 5088, 90);
+    this.physics.add.collider(this.player.sprite, this.movingPlatform);
+
+    // ── Level-2 portal at far end ───────────────────────────────
+    // Sits past chest 2.  Same overlap → reachPortal flow as level 1.
+    this.portal = this.createPortal(65 * TS - TS / 2, floorSurf - 48);
+    this.physics.add.overlap(
+      this.player.sprite, this.portal,
+      () => this.reachPortal(), null, this
+    );
+  }
+
+  _createRangedDummy(x, y) {
+    const sprite = this.physics.add.sprite(x, y, 'ranged_dummy').setScale(SCALE);
+    sprite.body.setAllowGravity(true);
+    sprite.setCollideWorldBounds(true);
+    this._fitBodyToTexture(sprite, { shrink: 0.85 });
+    const maxHp = 5;
+    // Floating HP bar (world-space), hidden until updateRangedBars runs.
+    const barBg = this.add.rectangle(0, 0, 70, 9, 0x220000).setOrigin(0.5, 1).setDepth(15).setVisible(false);
+    const barFg = this.add.rectangle(0, 0, 70, 9, 0xff3333).setOrigin(0,   1).setDepth(15).setVisible(false);
+    const barLb = this.add.text(0, 0, '', { fontSize: '9px', fontFamily: 'monospace', color: '#ffbbbb' })
+      .setOrigin(0.5, 1).setDepth(15).setVisible(false);
+    const rd = { sprite, hp: maxHp, maxHp, dead: false, fireTimer: 0,
+                 bar: { bg: barBg, fg: barFg, label: barLb } };
+    // Stagger the two dummies so they don't fire in unison.
+    rd.fireTimer = 1500 + Math.random() * 1500;
+    return rd;
+  }
+
+  _updateRangedBars() {
+    if (!this.rangedDummies) return;
+    for (const rd of this.rangedDummies) {
+      const b = rd.bar;
+      if (rd.dead || !rd.sprite.active) {
+        b.bg.setVisible(false); b.fg.setVisible(false); b.label.setVisible(false);
+        continue;
+      }
+      const ds = rd.sprite, barW = 70;
+      const bx = ds.x, by = ds.y - ds.displayHeight / 2 - 6;
+      b.bg.setPosition(bx, by).setSize(barW, 9).setVisible(true);
+      b.fg.setPosition(bx - barW / 2, by).setSize(barW * rd.hp / rd.maxHp, 9).setVisible(true);
+      b.label.setPosition(bx, by - 9).setText(`HP: ${rd.hp} / ${rd.maxHp}`).setVisible(true);
     }
+  }
+
+  _createChestL2(x, y, tag) {
+    // NOTE: don't play 'chest_closed' here — buildAnims() hasn't run
+    // yet at entity-build time.  The closed anim is started after
+    // buildAnims() in create(), mirroring level 1's chest.
+    const sprite = this.physics.add.sprite(x, y, 'chest').setScale(5).setImmovable(true);
+    sprite.body.setAllowGravity(false);
+    this._fitBodyToTexture(sprite, { frame: 0 });
+    return { sprite, opened: false, tag };
+  }
+
+  _createMovingPlatform(x, y, xMin, xMax, speed) {
+    const sprite = this.physics.add.image(x, y, 'moving_platform').setScale(SCALE);
+    sprite.body.setAllowGravity(false);
+    sprite.body.setImmovable(true);
+    // Body matches the original platform footprint (32 unscaled → 96px),
+    // even though the moving_platform art is bigger.  User spec: same
+    // length as normal platform.  Height is the art's pixel height
+    // (kept thin so the player stands clearly on top).
+    sprite.body.setSize(32, 8).setOffset(0, 0);
+    sprite._xMin = xMin;
+    sprite._xMax = xMax;
+    sprite._speed = speed;
+    sprite._dir   = 1;
+    sprite.body.setVelocityX(speed);
+
+    // Dotted-line path indicator (drawn under the platform).
+    const dots = this.add.graphics().setDepth(0);
+    dots.fillStyle(0xffffff, 0.55);
+    const dotR = 3, gap = 12;
+    for (let dx = xMin; dx <= xMax; dx += gap) {
+      dots.fillCircle(dx, y + 22, dotR);
+    }
+    sprite._dotsGfx = dots;
+    return sprite;
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -1259,11 +1482,20 @@ class GameScene extends Phaser.Scene {
           'them all for a surprise!',
         ] },
       ],
-      2: [],
+      2: [
+        // Top safe A — just before the overhead duck platforms (tile 20).
+        // topLevel:true floats it above the elevated platform, not the floor.
+        { x: 18 * TS, topLevel: true,
+          lines: ['Press ↓ or S to duck', 'and slip under spikes'] },
+        // Floor drop area — by the second ranged dummy (tile 46)
+        { x: 44 * TS, lines: ['Hold T or / to block', 'and reduce incoming damage'] },
+      ],
     };
     const defs = defsByLevel[this._levelNum] || [];
+    const topSurface = groundTop - 4 * TS;   // level-2 elevated platform surface
 
-    this._instructionBoxes = defs.map(({ x, lines }) => {
+    this._instructionBoxes = defs.map(({ x, lines, topLevel }) => {
+      const boxYThis = (topLevel ? topSurface : groundTop) - 240;
       // Size the box to the text
       const lineCount = lines.length;
       const boxH = lineCount * (FONT + LS) + PAD * 2 - LS;
@@ -1278,9 +1510,9 @@ class GameScene extends Phaser.Scene {
       // Subtle lighter border
       bg.lineStyle(2, 0x4a5888, 1);
       bg.strokeRect(-boxW / 2, -boxH / 2, boxW, boxH);
-      bg.setPosition(x, boxY);
+      bg.setPosition(x, boxYThis);
 
-      const txt = this.add.text(x, boxY, lines.join('\n'), {
+      const txt = this.add.text(x, boxYThis, lines.join('\n'), {
         fontSize:   `${FONT}px`,
         fontFamily: '"Courier New", Courier, monospace',
         fontStyle:  'bold',
@@ -1380,6 +1612,237 @@ class GameScene extends Phaser.Scene {
     this.updateDummyBar();
     this._checkDummyProximity();
     this._checkPatrolDummyProximity();
+    this._updateLevel2(delta);
+  }
+
+  // Per-frame tick for level-2-specific systems: ranged dummies firing,
+  // projectile cleanup, moving platform reversal, element cooldown.
+  _updateLevel2(delta) {
+    if (this._levelNum !== 2) return;
+    if (this._elementCooldown > 0) this._elementCooldown -= delta;
+    this._updateRangedBars();
+
+    // ── Ranged dummies: shoot a fireball every ~3s ────────────────
+    if (this.rangedDummies) {
+      for (const rd of this.rangedDummies) {
+        if (rd.dead) continue;
+        rd.fireTimer -= delta;
+        if (rd.fireTimer <= 0) {
+          rd.fireTimer = 3000;
+          this._fireBlueFireball(rd);
+        }
+      }
+    }
+
+    // ── Recycle off-screen / dead projectiles ────────────────────
+    if (this.fireballs) {
+      this.fireballs.children.iterate(fb => {
+        if (!fb) return;
+        if (fb.x < -64 || fb.x > this.physics.world.bounds.width + 64) fb.destroy();
+      });
+    }
+    if (this.elementProjectiles) {
+      this.elementProjectiles.children.iterate(pr => {
+        if (!pr) return;
+        // Each shot has its own _maxX/_minX travel cap stored at spawn.
+        if (pr._dir > 0 && pr.x > pr._maxX) pr.destroy();
+        else if (pr._dir < 0 && pr.x < pr._maxX) pr.destroy();
+      });
+    }
+
+    // ── Moving platform: bounce between x bounds + carry rider ───
+    if (this.movingPlatform) {
+      const mp = this.movingPlatform;
+      if (mp._dir === 1 && mp.x >= mp._xMax) {
+        mp._dir = -1; mp.body.setVelocityX(-mp._speed);
+      } else if (mp._dir === -1 && mp.x <= mp._xMin) {
+        mp._dir =  1; mp.body.setVelocityX(mp._speed);
+      }
+      // Carry the player: arcade physics doesn't move a rider with an
+      // immovable platform, so add the platform's per-frame delta to
+      // the player's x while they stand on top.
+      const ps = this.player.sprite, pb = ps.body;
+      const dx = (mp._prevX == null) ? 0 : (mp.x - mp._prevX);
+      const riding = pb.blocked.down &&
+        Math.abs(pb.bottom - mp.body.top) < 10 &&
+        ps.x > mp.body.left - 12 && ps.x < mp.body.right + 12;
+      if (riding && dx !== 0) ps.x += dx;
+      mp._prevX = mp.x;
+    }
+
+    // ── Block input (T or '/' ) ──────────────────────────────────
+    const k = this.keys;
+    this._blocking = !!(k && (k.t.isDown || k.slash.isDown));
+    this._updateShieldOverlay();
+  }
+
+  // Spawn a Blue_Fireball travelling straight left or right toward
+  // wherever the player currently is.  Damage on overlap = 3.
+  _fireBlueFireball(rd) {
+    if (!this.fireballs || !this.player) return;
+    const ps = this.player.sprite;
+    const dir = ps.x < rd.sprite.x ? -1 : 1;
+    const fb = this.fireballs.create(rd.sprite.x + dir * 60, rd.sprite.y, 'blue_fireball', 0);
+    if (!fb) return;
+    fb.setScale(SCALE);
+    fb.body.setAllowGravity(false);
+    fb.setFlipX(dir < 0);
+    fb.body.setSize(20, 16).setOffset(6, 8);
+    fb.body.setVelocityX(dir * 360);
+    fb._damage = 3;
+    // Two-frame loop animation
+    if (!this.anims.exists('blue_fireball_loop')) {
+      this.anims.create({
+        key: 'blue_fireball_loop', frameRate: 8, repeat: -1,
+        frames: this.anims.generateFrameNumbers('blue_fireball', { start: 0, end: 1 }),
+      });
+    }
+    fb.anims.play('blue_fireball_loop', true);
+  }
+
+  _onPlayerHitByFireball(fb) {
+    if (!fb || !fb.active) return;
+    if (this._spikeHit) { fb.destroy(); return; }   // i-frames absorb
+    let dmg = fb._damage || 3;
+    // Blocking is a base stance: it knocks 2 off incoming damage, and
+    // an equipped shield adds its defenceLevel on top (so a shield
+    // fully negates a 3-damage fireball).  Without a shield the player
+    // still takes the chip damage.
+    if (this._blocking) {
+      dmg = Math.max(0, dmg - (2 + this._shieldDefence()));
+    }
+    fb.destroy();
+    if (dmg <= 0) {
+      // Flash white briefly to show a successful block
+      this.player.sprite.setTintFill(0xffffff);
+      this.time.delayedCall(80, () => this.player.sprite.clearTint());
+      return;
+    }
+    this._hp = Math.max(0, this._hp - dmg);
+    if (this._hp <= 0) { this.respawnPlayer(); return; }
+    this._spikeHit = true;
+    const ps = this.player.sprite;
+    ps.setTintFill(0xff4444);
+    this.cameras.main.shake(100, 0.007);
+    this.time.delayedCall(140, () => ps.clearTint());
+    this.tweens.add({
+      targets: ps, alpha: 0.4,
+      duration: 70, yoyo: true, repeat: 5,
+      onComplete: () => { ps.setAlpha(1); this._spikeHit = false; }
+    });
+  }
+
+  _onElementHitDummy(rd, pr) {
+    if (rd.dead || !pr || !pr.active) return;
+    const dmg = pr._damage || 1;
+    // Earth + Air can pierce; Fire/Water single-hit
+    const pierce = !!pr._pierce;
+    rd.hp = Math.max(0, rd.hp - dmg);
+    if (!pierce) pr.destroy();
+    rd.sprite.setTintFill(0xffffff);
+    this.time.delayedCall(80, () => { if (!rd.dead) rd.sprite.clearTint(); });
+    // Knockback for Air
+    if (pr._knockback) {
+      rd.sprite.body.setVelocityX(pr._dir * pr._knockback);
+      this.time.delayedCall(200, () => { if (rd.sprite?.active) rd.sprite.body.setVelocityX(0); });
+    }
+    if (rd.hp <= 0) {
+      rd.dead = true;
+      this.tweens.add({
+        targets: rd.sprite, angle: 90, alpha: 0, duration: 360, ease: 'Power2',
+        onComplete: () => rd.sprite.destroy(),
+      });
+    }
+  }
+
+  _isShielded() {
+    if (!window.statusSheet) return false;
+    const eq = window.statusSheet.getState().equipment;
+    return !!(eq && eq.defence && eq.defence.itemId);
+  }
+
+  _shieldDefence() {
+    if (!window.statusSheet || !window.itemRegistry) return 0;
+    const slot = window.statusSheet.getState().equipment?.defence;
+    const id = slot?.itemId;
+    if (!id) return 0;
+    const item = window.itemRegistry.get(id);
+    return Math.max(0, Number(item?.stats?.defenceLevel) || 0);
+  }
+
+  // Floats a shield image on the player's free hand while blocking.
+  _updateShieldOverlay() {
+    if (!this.player) return;
+    if (!this._shieldOverlay) {
+      this._shieldOverlay = this.add.image(0, 0, 'shield_overlay')
+        .setScale(SCALE * 0.7).setDepth(this.player.sprite.depth + 1).setVisible(false);
+    }
+    // Show the guard visual whenever blocking (base stance).  A real
+    // equipped shield would just make the block stronger, not gate the
+    // pose.
+    const show = this._blocking;
+    this._shieldOverlay.setVisible(show);
+    if (!show) return;
+    const s = this.player.sprite;
+    const dir = s.flipX ? 1 : -1;   // shield is on the off-hand (opposite the sword)
+    this._shieldOverlay.setPosition(s.x + dir * 14, s.y + 4);
+    this._shieldOverlay.setFlipX(dir < 0);
+  }
+
+  // Spawn the currently-selected element projectile.  Called by
+  // updatePlayer when the player clicks (mouse) or presses '1'.
+  _fireElement() {
+    if (!this._element) return;
+    if (this._elementCooldown > 0) return;
+    if (!this.elementProjectiles) return;
+    const ps = this.player.sprite;
+    const dir = ps.flipX ? 1 : -1;
+    const defs = {
+      fire:  { tex: 'proj_fire',  speed: 480, dmg: 3, range: 240, cd: 700,  scale: SCALE * 1.0 },
+      water: { tex: 'proj_water', speed: 420, dmg: 2, range: 520, cd: 650,  scale: SCALE * 0.9 },
+      air:   { tex: 'proj_air',   speed: 540, dmg: 1, range: 220, cd: 500,  scale: SCALE * 0.85, knockback: 380, pierce: true },
+      earth: { tex: 'proj_earth', speed: 360, dmg: 5, range: 240, cd: 900,  scale: SCALE * 0.95, pierce: true, snake: true },
+    };
+    const def = defs[this._element];
+    if (!def) return;
+    this._elementCooldown = def.cd;
+
+    const startX = ps.x + dir * 36;
+    const startY = def.snake ? ps.body.bottom - 8 : ps.y;
+    const pr = this.elementProjectiles.create(startX, startY, def.tex);
+    if (!pr) return;
+    pr.setScale(def.scale);
+    pr.setFlipX(dir < 0);
+    pr.body.setAllowGravity(false);
+    pr.body.setVelocityX(dir * def.speed);
+    pr._dir = dir;
+    pr._damage = def.dmg;
+    pr._maxX = startX + dir * def.range;
+    if (def.knockback) pr._knockback = def.knockback;
+    if (def.pierce) pr._pierce = true;
+    // Earth "snakes" — sine-wave Y oscillation along the ground
+    if (def.snake) {
+      pr._snakeY = startY;
+      const baseY = startY;
+      this.tweens.add({
+        targets: pr, y: baseY - 6, duration: 110, yoyo: true, repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+    }
+    // Element-specific muzzle tint
+    const tint = { fire: 0xff8844, water: 0x66ccff, air: 0xffffff, earth: 0x99cc66 }[this._element];
+    if (tint) pr.setTint(tint);
+  }
+
+  // Fire the selected element when the player taps '1' or clicks.  Both
+  // are edge-triggered (JustDown / a per-frame pointer flag) so holding
+  // doesn't auto-fire — the cooldown in _fireElement still gates rate.
+  _tryFireElement(k) {
+    if (this._levelNum !== 2 || !this._element) return;
+    const keyOne   = k && k.one && Phaser.Input.Keyboard.JustDown(k.one);
+    const clicked  = this._firePointerQueued;
+    this._firePointerQueued = false;
+    if (keyOne || clicked) this._fireElement();
   }
 
   // Drive the sword overlay through an asymmetric arc on each swing:
@@ -1460,16 +1923,27 @@ class GameScene extends Phaser.Scene {
     this._jumpHeld = jp;
 
     if ((k.down.isDown || k.s.isDown) && onGround) {
-      // Duck: play crouch anim but still allow slow horizontal movement
+      // Duck: play crouch anim, slow horizontal movement.  ALSO shrink
+      // the body's vertical extent so the player fits under low
+      // overhead platforms (level 2).  Width stays 14; height drops
+      // 27 → 14 with the offset pushed down so the feet stay put.
       s.anims.play('duck', true);
+      if (s.body.height !== 14) {
+        s.body.setSize(14, 14).setOffset((s.frame.width - 14) / 2, 15);
+      }
       this.applyHorizontalMove(p, k, 0.4);
       // Keep the overlay tracking the player while ducking — without
       // this, the sword stays painted at the last position before duck
       // started and visibly floats while the player slides underneath.
       this._updateWeaponOverlay();
+      this._tryFireElement(k);
       return;
+    } else if (s.body.height === 14) {
+      // Stood back up — restore the full standing hitbox.
+      s.body.setSize(14, 27).setOffset((s.frame.width - 14) / 2, 2);
     }
 
+    this._tryFireElement(k);
     this.applyHorizontalMove(p, k, 1);
 
     // Base animation off key state, not velocity, so it responds the instant
@@ -1588,6 +2062,56 @@ class GameScene extends Phaser.Scene {
       const facing = ps.flipX ? cs.x > ps.x : cs.x < ps.x;
       if (Math.abs(ps.x-cs.x) < reach && Math.abs(ps.y-cs.y) < TS && facing) this.openChest();
     }
+    // ── Level 2 melee targets ────────────────────────────────────
+    // The sword carried over from level 1 can also kill the ranged
+    // dummies and trip the two L2 checkpoint chests.
+    if (this.rangedDummies) {
+      for (const rd of this.rangedDummies) {
+        if (rd.dead) continue;
+        const ds = rd.sprite;
+        const facing = ps.flipX ? ds.x > ps.x : ds.x < ps.x;
+        if (Math.abs(ps.x-ds.x) < reach && Math.abs(ps.y-ds.y) < TS && facing) {
+          this._hitRangedDummy(rd);
+        }
+      }
+    }
+    [this.chestL2A, this.chestL2B].forEach(c => {
+      if (!c || c.opened) return;
+      const cs = c.sprite;
+      const facing = ps.flipX ? cs.x > ps.x : cs.x < ps.x;
+      if (Math.abs(ps.x-cs.x) < reach && Math.abs(ps.y-cs.y) < TS && facing) {
+        this._openChestL2(c);
+      }
+    });
+  }
+
+  // Melee a ranged dummy (shares the element-hit damage/death path).
+  _hitRangedDummy(rd) {
+    rd.hp = Math.max(0, rd.hp - this._meleeDamage());
+    rd.sprite.setTintFill(0xffffff);
+    this.time.delayedCall(90, () => { if (!rd.dead) rd.sprite.clearTint(); });
+    if (rd.hp <= 0) {
+      rd.dead = true;
+      this.tweens.add({
+        targets: rd.sprite, angle: 90, alpha: 0, duration: 360, ease: 'Power2',
+        onComplete: () => rd.sprite.destroy(),
+      });
+    }
+  }
+
+  // Both level-2 chests are plain checkpoints: open animation, a
+  // "Checkpoint!" banner, and a respawn-point move.  No loot or
+  // cinematic (deferred — chests act as checkpoints for now).
+  _openChestL2(c) {
+    if (c.opened) return;
+    c.opened = true;
+    c.sprite.anims.play('chest_open', true);
+    this.tweens.add({ targets: c.sprite, scaleX: 5 * 1.15, scaleY: 5 * 1.15,
+      duration: 120, yoyo: true, repeat: 2 });
+    this._respawnX = c.sprite.x - 80;
+    this._respawnY = c.sprite.y - 30;
+    this.checkpointText.setVisible(true);
+    this.time.delayedCall(1800, () => this.checkpointText.setVisible(false));
   }
 
   // Damage of the equipped melee weapon (or 1 for bare fists).
@@ -1911,11 +2435,14 @@ class GameScene extends Phaser.Scene {
   reachPortal() {
     if (this._portalReached) return;
     this._portalReached = true;
-    this.registry.set('level1Complete', true);
-    if (this._gotStar) this.registry.set('level1Star', true);  // only saved now
+    // Flag the completion of whichever level we're in.
+    const completeKey = `level${this._levelNum}Complete`;
+    const starKey     = `level${this._levelNum}Star`;
+    this.registry.set(completeKey, true);
+    if (this._gotStar) this.registry.set(starKey, true);   // only saved now
     // Persist to localStorage for logged-in users (guests are no-ops).
-    const update = { level1Complete: true };
-    if (this._gotStar) update.level1Star = true;
+    const update = { [completeKey]: true };
+    if (this._gotStar) update[starKey] = true;
     saveProgress(update);
 
     // ── Freeze the player ────────────────────────────────────────

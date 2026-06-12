@@ -137,6 +137,15 @@
     stats: { damage: 2, attackSpeed: 0.6, range: 3, specialities: '' },
   });
 
+  defineItem({
+    id:      'wooden_shield',
+    name:    'Wooden Shield',
+    iconSrc: 'assets/Shield.png',
+    type:    'defence',
+    rarity:  'common',
+    stats: { defenceLevel: 1, maxDurability: 50 },
+  });
+
   // ── Expose ───────────────────────────────────
   window.itemRegistry = {
     define:  defineItem,
