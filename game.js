@@ -234,7 +234,7 @@ class PreloadScene extends Phaser.Scene {
     this.load.image('star',     'assets/star.png');
     // Level 2 — ranged dummy + element projectiles + moving platform
     this.load.image('ranged_dummy',    'assets/Ranged_Dummy.png');
-    this.load.image('moving_platform', 'assets/New Piskel.png');
+    this.load.image('moving_platform', 'assets/Moving Platform.png');
     this.load.image('shield_overlay',  'assets/Shield.png');
     this.load.spritesheet('blue_fireball', 'assets/Blue_Fireball.png', { frameWidth: 32, frameHeight: 32 });
     this.load.spritesheet('bow',           'assets/Bow.png',           { frameWidth: 32, frameHeight: 32 });
@@ -770,6 +770,18 @@ class GameScene extends Phaser.Scene {
     // Top-level grass
     grass(14 * TS, 16, topY);            // top safe A (tiles 14–29)
     grass(33 * TS,  6, topY);            // top safe B (tiles 33–38), post-jump
+
+    // Fill the gap beneath top-safe-B so the plateau reads as a solid
+    // dirt mesa rather than a floating slab.  Rows between the top grass
+    // (topY) and the floor grass (floorY): floorY-3TS … floorY-1TS.
+    // Top-safe-A is deliberately NOT filled — it floats over the giant
+    // spike pit at the start, which is the intended gameplay gap.
+    const dirtFill = (startX, cols, y) => {
+      for (let i = 0; i < cols; i++) {
+        this.platforms.create(startX + i * TS, y, 'dirt').setScale(SCALE).refreshBody();
+      }
+    };
+    for (let row = 1; row <= 3; row++) dirtFill(33 * TS, 6, floorY - row * TS);
 
     // Underground dirt — full width
     const totalCols = Math.ceil(worldW / TS) + 1;
@@ -1688,7 +1700,7 @@ class GameScene extends Phaser.Scene {
     fb.body.setAllowGravity(false);
     fb.setFlipX(dir < 0);
     fb.body.setSize(20, 16).setOffset(6, 8);
-    fb.body.setVelocityX(dir * 360);
+    fb.body.setVelocityX(dir * 160);   // 0.8× the player's 200px/s run speed
     fb._damage = 3;
     // Two-frame loop animation
     if (!this.anims.exists('blue_fireball_loop')) {
