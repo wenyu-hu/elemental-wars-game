@@ -911,6 +911,9 @@ class GameScene extends Phaser.Scene {
     const sprite = this.physics.add.sprite(x, y, 'ranged_dummy').setScale(SCALE);
     sprite.body.setAllowGravity(true);
     sprite.setCollideWorldBounds(true);
+    // Idle dummy: gravity still plants it on the floor, but the player
+    // can't shove it around (otherwise it slides off into the spikes).
+    sprite.body.pushable = false;
     this._fitBodyToTexture(sprite, { shrink: 0.85 });
     const maxHp = 5;
     // Floating HP bar (world-space), hidden until updateRangedBars runs.
@@ -955,11 +958,9 @@ class GameScene extends Phaser.Scene {
     const sprite = this.physics.add.image(x, y, 'moving_platform').setScale(SCALE);
     sprite.body.setAllowGravity(false);
     sprite.body.setImmovable(true);
-    // Body matches the original platform footprint (32 unscaled → 96px),
-    // even though the moving_platform art is bigger.  User spec: same
-    // length as normal platform.  Height is the art's pixel height
-    // (kept thin so the player stands clearly on top).
-    sprite.body.setSize(32, 8).setOffset(0, 0);
+    // Crop the hitbox to the platform's actual painted pixels (the art
+    // sits inside a 32×32 frame with transparent margins).
+    this._fitBodyToTexture(sprite);
     sprite._xMin = xMin;
     sprite._xMax = xMax;
     sprite._speed = speed;
