@@ -769,19 +769,7 @@ class GameScene extends Phaser.Scene {
 
     // Top-level grass
     grass(14 * TS, 16, topY);            // top safe A (tiles 14–29)
-    grass(33 * TS,  6, topY);            // top safe B (tiles 33–38), post-jump
-
-    // Fill the gap beneath top-safe-B so the plateau reads as a solid
-    // dirt mesa rather than a floating slab.  Rows between the top grass
-    // (topY) and the floor grass (floorY): floorY-3TS … floorY-1TS.
-    // Top-safe-A is deliberately NOT filled — it floats over the giant
-    // spike pit at the start, which is the intended gameplay gap.
-    const dirtFill = (startX, cols, y) => {
-      for (let i = 0; i < cols; i++) {
-        this.platforms.create(startX + i * TS, y, 'dirt').setScale(SCALE).refreshBody();
-      }
-    };
-    for (let row = 1; row <= 3; row++) dirtFill(33 * TS, 6, floorY - row * TS);
+    // (No top-safe-B plateau — player drops from top-safe-A to the floor.)
 
     // Underground dirt — full width
     const totalCols = Math.ceil(worldW / TS) + 1;
