@@ -782,6 +782,13 @@ class GameScene extends Phaser.Scene {
     plat(11 * TS, floorY - 4 * TS);
     plat(13 * TS, floorY - 4 * TS);
 
+    // Descending staircase off the right edge of top-safe-A (tile 29)
+    // down to the floor drop area (tile 33), so the drop is a gentle
+    // step-down over the spike pit instead of a sheer fall.
+    plat(30 * TS, floorY - 3 * TS);
+    plat(31 * TS, floorY - 2 * TS);
+    plat(32 * TS, floorY - 1 * TS);
+
     // ── Three "duck-under" overhead platforms ────────────────────
     // Heights derived from the player's standing vs crouched body so
     // a standing player is blocked but a crouched one (body shrinks to
