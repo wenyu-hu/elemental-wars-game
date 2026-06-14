@@ -871,6 +871,15 @@ class GameScene extends Phaser.Scene {
       this.player.sprite, this.fireballs,
       (_p, fb) => this._onPlayerHitByFireball(fb), null, this
     );
+    // Fireballs burst into blue pixels when they strike solid terrain.
+    this.physics.add.collider(
+      this.fireballs, this.platforms,
+      (fb) => this._onFireballHitSolid(fb), null, this
+    );
+    this.physics.add.collider(
+      this.fireballs, this.spikes,
+      (fb) => this._onFireballHitSolid(fb), null, this
+    );
     // Player element shots damage ranged dummies
     this.rangedDummies.forEach(rd => {
       this.physics.add.overlap(
@@ -1683,7 +1692,7 @@ class GameScene extends Phaser.Scene {
   }
 
   // Spawn a Blue_Fireball travelling straight left or right toward
-  // wherever the player currently is.  Damage on overlap = 3.
+  // wherever the player currently is.  Damage on overlap = 5.
   _fireBlueFireball(rd) {
     if (!this.fireballs || !this.player) return;
     const ps = this.player.sprite;
@@ -1695,7 +1704,7 @@ class GameScene extends Phaser.Scene {
     fb.setFlipX(dir < 0);
     fb.body.setSize(20, 16).setOffset(6, 8);
     fb.body.setVelocityX(dir * 160);   // 0.8× the player's 200px/s run speed
-    fb._damage = 3;
+    fb._damage = 5;
     // Two-frame loop animation
     if (!this.anims.exists('blue_fireball_loop')) {
       this.anims.create({
@@ -1708,8 +1717,9 @@ class GameScene extends Phaser.Scene {
 
   _onPlayerHitByFireball(fb) {
     if (!fb || !fb.active) return;
-    if (this._spikeHit) { fb.destroy(); return; }   // i-frames absorb
-    let dmg = fb._damage || 3;
+    const fx = fb.x, fy = fb.y;
+    if (this._spikeHit) { this._explodeFireball(fx, fy); fb.destroy(); return; }   // i-frames absorb
+    let dmg = fb._damage || 5;
     // Blocking is a base stance: it knocks 2 off incoming damage, and
     // an equipped shield adds its defenceLevel on top (so a shield
     // fully negates a 3-damage fireball).  Without a shield the player
@@ -1717,6 +1727,7 @@ class GameScene extends Phaser.Scene {
     if (this._blocking) {
       dmg = Math.max(0, dmg - (2 + this._shieldDefence()));
     }
+    this._explodeFireball(fx, fy);
     fb.destroy();
     if (dmg <= 0) {
       // Flash white briefly to show a successful block
@@ -1736,6 +1747,35 @@ class GameScene extends Phaser.Scene {
       duration: 70, yoyo: true, repeat: 5,
       onComplete: () => { ps.setAlpha(1); this._spikeHit = false; }
     });
+  }
+
+  // Fireball hit solid terrain — burst into blue pixels and vanish.
+  _onFireballHitSolid(fb) {
+    if (!fb || !fb.active) return;
+    this._explodeFireball(fb.x, fb.y);
+    fb.destroy();
+  }
+
+  // Scatter a handful of little blue squares from (x, y) that fly
+  // outward, shrink, and fade — the fireball "exploding into pixels".
+  _explodeFireball(x, y) {
+    const colors = [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd];
+    for (let i = 0; i < 11; i++) {
+      const sz = (3 + Math.random() * 4) * (SCALE / 3);
+      const px = this.add.rectangle(x, y, sz, sz, colors[i % colors.length])
+        .setDepth(12);
+      const ang  = Math.random() * Math.PI * 2;
+      const dist = 16 + Math.random() * 28;
+      this.tweens.add({
+        targets: px,
+        x: x + Math.cos(ang) * dist,
+        y: y + Math.sin(ang) * dist,
+        alpha: 0, scaleX: 0.2, scaleY: 0.2,
+        duration: 260 + Math.random() * 200,
+        ease: 'Quad.easeOut',
+        onComplete: () => px.destroy(),
+      });
+    }
   }
 
   _onElementHitDummy(rd, pr) {
