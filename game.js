@@ -1945,8 +1945,21 @@ class GameScene extends Phaser.Scene {
       this._tryFireElement(k);
       return;
     } else if (s.body.height === 14) {
-      // Stood back up — restore the full standing hitbox.
-      s.body.setSize(14, 27).setOffset((s.frame.width - 14) / 2, 2);
+      // Trying to stand back up.  Only restore the full standing hitbox
+      // if there's headroom — otherwise the body would grow straight into
+      // an overhead platform, embedding the player (a size change carries
+      // no movement delta for arcade to separate against, so collision
+      // silently breaks and every spike platform turns non-solid).  Stay
+      // crouched and keep shuffling until clear of the obstacle.
+      if (this._hasStandHeadroom(s)) {
+        s.body.setSize(14, 27).setOffset((s.frame.width - 14) / 2, 2);
+      } else {
+        s.anims.play('duck', true);
+        this.applyHorizontalMove(p, k, 0.4);
+        this._updateWeaponOverlay();
+        this._tryFireElement(k);
+        return;
+      }
     }
 
     this._tryFireElement(k);
@@ -2049,6 +2062,29 @@ class GameScene extends Phaser.Scene {
     if      (k.left.isDown  || k.a.isDown) { s.body.setVelocityX(-spd); s.setFlipX(false); }
     else if (k.right.isDown || k.d.isDown) { s.body.setVelocityX( spd); s.setFlipX(true);  }
     else                                    { s.body.setVelocityX(0); }
+  }
+
+  // True when the full standing hitbox (14×27 at SCALE) would NOT overlap
+  // any platform above the crouched player's current feet — i.e. there's
+  // room to stand up.  Used to block standing while still under a low
+  // overhead platform (see the duck branch in updatePlayer).
+  _hasStandHeadroom(s) {
+    const halfW = (14 * SCALE) / 2;
+    const standH = 27 * SCALE;
+    const feet  = s.body.bottom;
+    const top   = feet - standH;
+    const left  = s.x - halfW;
+    const right = s.x + halfW;
+    const pad   = 2;   // ignore the floor we're standing on / grazing edges
+    for (const pl of this.platforms.getChildren()) {
+      const b = pl && pl.body;
+      if (!b) continue;
+      if (right - pad > b.left && left + pad < b.right &&
+          feet  - pad > b.top  && top  + pad < b.bottom) {
+        return false;
+      }
+    }
+    return true;
   }
 
   checkAttackHit() {
