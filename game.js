@@ -1934,7 +1934,9 @@ class GameScene extends Phaser.Scene {
       // overhead platforms (level 2).  Width stays 14; height drops
       // 27 → 14 with the offset pushed down so the feet stay put.
       s.anims.play('duck', true);
-      if (s.body.height !== 14) {
+      // NOTE: body.height is the *scaled* height (14·SCALE); the unscaled
+      // value we set lives in body.sourceHeight — compare against that.
+      if (s.body.sourceHeight !== 14) {
         s.body.setSize(14, 14).setOffset((s.frame.width - 14) / 2, 15);
       }
       this.applyHorizontalMove(p, k, 0.4);
@@ -1944,7 +1946,7 @@ class GameScene extends Phaser.Scene {
       this._updateWeaponOverlay();
       this._tryFireElement(k);
       return;
-    } else if (s.body.height === 14) {
+    } else if (s.body.sourceHeight === 14) {
       // Trying to stand back up.  Only restore the full standing hitbox
       // if there's headroom — otherwise the body would grow straight into
       // an overhead platform, embedding the player (a size change carries
