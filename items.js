@@ -56,7 +56,6 @@
       label: 'Defence', icon: '\uD83D\uDEE1', slot: 'defence',
       stats: [
         { key: 'defenceLevel',     label: 'Defence Level' },
-        { key: 'maxDurability',    label: 'Max Durability' },
       ],
     },
     rangedWeapon: {
@@ -143,7 +142,7 @@
     iconSrc: 'assets/Shield.png',
     type:    'defence',
     rarity:  'common',
-    stats: { defenceLevel: 1, maxDurability: 50 },
+    stats: { defenceLevel: 2 },
   });
 
   // ── Expose ───────────────────────────────────

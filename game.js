@@ -343,6 +343,7 @@ class MenuScene extends Phaser.Scene {
     this.registry.set('level1Complete',    !!progress.level1Complete);
     this.registry.set('level1Star',        !!progress.level1Star);
     this.registry.set('level1ChestOpened', !!progress.level1ChestOpened || preExistingCompleter);
+    this.registry.set('level2ChestAOpened', !!progress.level2ChestAOpened);
     this.registry.set('isGuest',        !user);
 
     // Hydrate the status sheet from saved progress (or reset to blank for guest/logged-out).
@@ -2183,9 +2184,9 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  // Both level-2 chests are plain checkpoints: open animation, a
-  // "Checkpoint!" banner, and a respawn-point move.  No loot or
-  // cinematic (deferred — chests act as checkpoints for now).
+  // Chest A drops the Wooden Shield + 10 XP and plays the level-up
+  // cinematic on its first open; chest B (and any replay) is a plain
+  // checkpoint: open animation, "Checkpoint!" banner, respawn move.
   _openChestL2(c) {
     if (c.opened) return;
     c.opened = true;
@@ -2194,8 +2195,20 @@ class GameScene extends Phaser.Scene {
       duration: 120, yoyo: true, repeat: 2 });
     this._respawnX = c.sprite.x - 80;
     this._respawnY = c.sprite.y - 30;
-    this.checkpointText.setVisible(true);
-    this.time.delayedCall(1800, () => this.checkpointText.setVisible(false));
+
+    const firstChestA = c.tag === 'A' && !this.registry.get('level2ChestAOpened');
+    if (firstChestA) {
+      this.registry.set('level2ChestAOpened', true);
+      saveProgress({ level2ChestAOpened: true });
+      this._playChestSequence({
+        xpGain: 10,
+        itemId: 'wooden_shield',
+        itemTextureKey: 'item_wooden_shield',
+      });
+    } else {
+      this.checkpointText.setVisible(true);
+      this.time.delayedCall(1800, () => this.checkpointText.setVisible(false));
+    }
   }
 
   // Damage of the equipped melee weapon (or 1 for bare fists).
@@ -2395,18 +2408,69 @@ class GameScene extends Phaser.Scene {
   }
 
   _chestPhaseOrbs(opts, ctx) {
-    const { cx, cy, BIG_W, BIG_H, startXp, endXp, xpToNext, barFill, barText, xpLabel } = ctx;
+    // Break the XP gain into per-level fill segments.  Any segment that
+    // tops the bar out is flagged levelUpAfter, so the driver plays a
+    // "Level UP!" beat and resets the bar before the next segment.
+    const xpToNext = ctx.xpToNext;
+    const segments = [];
+    let cur = ctx.startXp;
+    let remaining = opts.xpGain;
+    while (remaining > 0) {
+      const room = xpToNext - cur;
+      if (room > 0 && remaining >= room) {
+        segments.push({ from: cur, to: xpToNext, levelUpAfter: true });
+        remaining -= room;
+        cur = 0;
+      } else {
+        segments.push({ from: cur, to: cur + remaining, levelUpAfter: false });
+        cur += remaining;
+        remaining = 0;
+      }
+    }
+    this._runXpSegments(opts, ctx, segments, 0);
+    // Fade the "+N XP" label out as the first orbs leave.
+    this.tweens.add({ targets: ctx.xpLabel, alpha: 0, y: ctx.cy - 100, duration: 380, delay: 80 });
+  }
+
+  // Run fill segments in order, inserting a level-up beat between any
+  // segment that maxed the bar.  When all segments are done, persist and
+  // move on to the chest-reveal phase.
+  _runXpSegments(opts, ctx, segments, idx) {
+    if (idx >= segments.length) {
+      this._persistXp();
+      this.time.delayedCall(280, () => this._chestPhaseChest(opts, ctx));
+      return;
+    }
+    const seg = segments[idx];
+    this._chestFillSegment(ctx, seg, () => {
+      if (seg.levelUpAfter) {
+        this._chestLevelUp(ctx, () => this._runXpSegments(opts, ctx, segments, idx + 1));
+      } else {
+        this._runXpSegments(opts, ctx, segments, idx + 1);
+      }
+    });
+  }
+
+  // Fly ORB_COUNT blue orbs into the big bar, filling it from seg.from to
+  // seg.to (both within the current level), then call done().
+  _chestFillSegment(ctx, seg, done) {
+    const { cx, cy, BIG_W, BIG_H, xpToNext, barFill, barText } = ctx;
     const ORB_COUNT = 6;
-    const xpPerOrb  = (endXp - startXp) / ORB_COUNT;
+    const xpPerOrb  = (seg.to - seg.from) / ORB_COUNT;
     let landed = 0;
+
+    // Snap the bar to the segment's starting point.
+    barFill._fill = seg.from / xpToNext;
+    barFill.setSize(BIG_W * barFill._fill, BIG_H);
+    this._xp = Math.round(seg.from);
+    barText.setText(`${this._xp}/${xpToNext}`);
 
     for (let i = 0; i < ORB_COUNT; i++) {
       const orb = ctx.add(this.add.circle(cx + (i - ORB_COUNT/2) * 14, cy - 60, 8, 0x66c8ff));
       orb.setStrokeStyle(2, 0x1a4d8c);
       orb.setAlpha(0);
-      const targetX = cx - BIG_W/2 + BIG_W * ((startXp + xpPerOrb * (i + 1)) / xpToNext);
+      const targetX = cx - BIG_W/2 + BIG_W * ((seg.from + xpPerOrb * (i + 1)) / xpToNext);
       const delay   = 80 * i;
-      // Pop into existence at the label, then arc toward the bar.
       this.tweens.add({ targets: orb, alpha: 1, duration: 120, delay });
       this.tweens.add({
         targets: orb,
@@ -2415,13 +2479,12 @@ class GameScene extends Phaser.Scene {
         delay: delay + 120,
         ease: 'Cubic.easeIn',
         onComplete: () => {
-          // Pulse on impact + grow the bar fill via an addCounter tween
-          // that drives setSize() — tweening displayWidth on a
-          // Rectangle with width=0 doesn't render any growth.
+          // Pulse on impact + grow the bar fill via addCounter → setSize
+          // (tweening displayWidth on a width-0 Rectangle renders nothing).
           this.tweens.add({ targets: orb, alpha: 0, scale: 2, duration: 140 });
-          const newXp   = startXp + xpPerOrb * (landed + 1);
-          const fromF   = barFill._fill;
-          const toF     = newXp / xpToNext;
+          const newXp = seg.from + xpPerOrb * (landed + 1);
+          const fromF = barFill._fill;
+          const toF   = newXp / xpToNext;
           this.tweens.addCounter({
             from: fromF, to: toF,
             duration: 160, ease: 'Sine.easeOut',
@@ -2436,17 +2499,35 @@ class GameScene extends Phaser.Scene {
           barText.setText(`${this._xp}/${xpToNext}`);
           landed++;
           if (landed === ORB_COUNT) {
-            // Snap to exact target value to avoid float drift.
-            this._xp = endXp;
-            barText.setText(`${endXp}/${xpToNext}`);
-            this._persistXp();
-            this.time.delayedCall(280, () => this._chestPhaseChest(opts, ctx));
+            this._xp = Math.round(seg.to);
+            barText.setText(`${this._xp}/${xpToNext}`);
+            this.time.delayedCall(240, done);
           }
         },
       });
     }
-    // Fade label out as orbs leave.
-    this.tweens.add({ targets: xpLabel, alpha: 0, y: cy - 100, duration: 380, delay: 80 });
+  }
+
+  // "Level UP!" beat: pop the banner, bump the level (HUD mirrors it),
+  // then empty the bar for the new level and continue.
+  _chestLevelUp(ctx, done) {
+    const { cx, cy, BIG_W, BIG_H, xpToNext, barFill, barText } = ctx;
+    this._level += 1;
+    const lvlText = ctx.add(this.add.text(cx, cy - 70, 'Level UP!', {
+      fontSize: '46px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffd166', stroke: '#000000', strokeThickness: 6,
+    }).setOrigin(0.5).setAlpha(0).setScale(0.6));
+    this.tweens.add({ targets: lvlText, alpha: 1, scale: 1, duration: 320, ease: 'Back.easeOut' });
+    // Quick celebratory pulse of the full bar before it empties.
+    this.tweens.add({ targets: barFill, scaleY: 1.3, duration: 140, yoyo: true, repeat: 1 });
+    this.time.delayedCall(820, () => {
+      barFill._fill = 0;
+      barFill.setSize(0, BIG_H);
+      this._xp = 0;
+      barText.setText(`0/${xpToNext}`);
+      this.tweens.add({ targets: lvlText, alpha: 0, y: cy - 110, duration: 380 });
+      this.time.delayedCall(280, done);
+    });
   }
 
   _chestPhaseChest(opts, ctx) {
