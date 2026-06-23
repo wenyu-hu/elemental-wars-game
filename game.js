@@ -436,6 +436,7 @@ class GameScene extends Phaser.Scene {
     this.chestL2A      = null;     // first chest (shield + element-pick)
     this.chestL2B      = null;     // second chest (checkpoint)
     this.movingPlatform = null;    // moving platform sprite
+    this._shieldOverlay = null;    // block-stance shield (lazy-built)
     this._level2Complete = false;
   }
 
@@ -1273,6 +1274,8 @@ class GameScene extends Phaser.Scene {
       });
     }
     add('duck',         'player_duck',   0, 0,  4);
+    // Static block stance — the extended-fist attack frame, held.
+    add('block',        'player_attack', 3, 3,  4, 0);
     add('dummy_idle',   'dummy',         0, 0,  4);
     add('dummy_hit',    'dummy',         1, 1,  4, 0);
     add('chest_closed', 'chest',         0, 0,  4);
@@ -1831,9 +1834,14 @@ class GameScene extends Phaser.Scene {
     this._shieldOverlay.setVisible(show);
     if (!show) return;
     const s = this.player.sprite;
-    const dir = s.flipX ? 1 : -1;   // shield is on the off-hand (opposite the sword)
-    this._shieldOverlay.setPosition(s.x + dir * 14, s.y + 4);
+    const dir = s.flipX ? 1 : -1;   // facing/forward direction
+    // Cover the extended lead hand + forearm: shifted forward to the
+    // fist, at arm height, enlarged a touch so it shrouds the arm.  Sits
+    // above the player so it hides the hand.
+    this._shieldOverlay.setScale(SCALE * 1.05);
+    this._shieldOverlay.setPosition(s.x + dir * 16, s.y + 8);
     this._shieldOverlay.setFlipX(dir < 0);
+    this._shieldOverlay.setDepth(s.depth + 2);
   }
 
   // Spawn the currently-selected element projectile.  Called by
@@ -1959,6 +1967,29 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
+    // ── Block stance (level 2) ───────────────────────────────────
+    // Hold T or '/' to guard: freeze into the extended-fist attack
+    // frame (no weapon in hand), sheath the sword across the back, and
+    // raise the shield over the lead hand/arm.  Movement still works,
+    // but duck and jump are locked out so the player commits to the
+    // stance.  Placed BEFORE the jump/duck branches so it preempts them.
+    if (this._levelNum === 2 && (k.t.isDown || k.slash.isDown) && onGround) {
+      this._tryFireElement(k);
+      this.applyHorizontalMove(p, k, 1);
+      s.anims.play('block', true);
+      // Make sure the standing hitbox is restored — block must not leave
+      // the player crouched if they pressed T mid-duck.
+      if (s.body.sourceHeight !== 27 && this._hasStandHeadroom(s)) {
+        s.body.setSize(14, 27).setOffset((s.frame.width - 14) / 2, 2);
+      }
+      this._updateWeaponOverlay();
+      this._updateShieldOverlay();
+      // Reset the jump-rising-edge guard so a queued up-press while
+      // blocking doesn't fire the moment the block is released.
+      this._jumpHeld = k.up.isDown || k.w.isDown;
+      return;
+    }
+
     const jp = k.up.isDown || k.w.isDown;
     if (jp && !this._jumpHeld && p.jumpsLeft > 0) {
       bod.setVelocityY(-Math.sqrt(2 * Math.abs(this.physics.world.gravity.y) * TS));
@@ -2070,6 +2101,10 @@ class GameScene extends Phaser.Scene {
         // the hilt above the shoulder and the blade tip below the hip
         // poke out of the silhouette — exactly the back-sheath look.
         duck:          [{ x: -3, y: -1, a: 180 }],
+        // Block stance: the exact duck sheathe (same x and a=180 → blade
+        // straight down the back, tucked against the body) just raised in
+        // y so the hilt clears the taller standing silhouette's shoulder.
+        block:         [{ x: -3, y: -7, a: 180 }],
         attack:        [
           { x: 5, y:  6, a:  10 },
           { x: 7, y:  3, a: -30 },
@@ -2096,7 +2131,8 @@ class GameScene extends Phaser.Scene {
     // Sheathed-on-back when ducking → render behind the player so only
     // the hilt and blade tip stick out of the silhouette.  Otherwise
     // the sword sits in the hand in front of the body.
-    const sheathed = (s.anims.currentAnim?.key === 'duck');
+    const animNow  = s.anims.currentAnim?.key;
+    const sheathed = (animNow === 'duck' || animNow === 'block');
     w.setDepth(s.depth + (sheathed ? -1 : 1));
   }
 
