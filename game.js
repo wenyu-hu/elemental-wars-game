@@ -916,6 +916,18 @@ class GameScene extends Phaser.Scene {
       this.player.sprite, this.portal,
       () => this.reachPortal(), null, this
     );
+
+    // ── Secret star ───────────────────────────────────────────────
+    this._starOrigY  = 800;
+    this._starSprite = this.physics.add.image(1500, this._starOrigY, 'star');
+    this._starSprite.setScale(SCALE);
+    this._starSprite.setDepth(10);
+    this._starSprite.body.setAllowGravity(false);
+    this._startStarBob();
+    this.physics.add.overlap(
+      this.player.sprite, this._starSprite,
+      () => this.collectStar(), null, this
+    );
   }
 
   _createRangedDummy(x, y) {
