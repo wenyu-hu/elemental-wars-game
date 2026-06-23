@@ -907,7 +907,9 @@ class GameScene extends Phaser.Scene {
     //   Speed = 90 px/s (moderate steady pace).
     const mpY = floorSurf - 30;
     this.movingPlatform = this._createMovingPlatform(4900, mpY, 4800, 5088, 90);
-    this.physics.add.collider(this.player.sprite, this.movingPlatform);
+    this.physics.add.collider(this.player.sprite, this.movingPlatform, (ps) => {
+      if (ps.body.touching.down) this._riderOnMP = true;
+    });
 
     // ── Level-2 portal at far end ───────────────────────────────
     // Sits past chest 2.  Same overlap → reachPortal flow as level 1.
@@ -1691,13 +1693,15 @@ class GameScene extends Phaser.Scene {
       }
       // Carry the player: arcade physics doesn't move a rider with an
       // immovable platform, so add the platform's per-frame delta to
-      // the player's x while they stand on top.
-      const ps = this.player.sprite, pb = ps.body;
+      // the player's x while they stand on top.  Riding is detected via
+      // the actual collider's touching.down flag (set this frame by the
+      // collider callback) rather than an approximate bounding-box check,
+      // which could drop out near the platform's edges and let the
+      // player get left behind mid-air.
+      const ps = this.player.sprite;
       const dx = (mp._prevX == null) ? 0 : (mp.x - mp._prevX);
-      const riding = pb.blocked.down &&
-        Math.abs(pb.bottom - mp.body.top) < 10 &&
-        ps.x > mp.body.left - 12 && ps.x < mp.body.right + 12;
-      if (riding && dx !== 0) ps.x += dx;
+      if (this._riderOnMP && dx !== 0) ps.x += dx;
+      this._riderOnMP = false;
       mp._prevX = mp.x;
     }
 
