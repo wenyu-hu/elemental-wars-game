@@ -8,6 +8,20 @@ const TILE  = 32;
 const TS    = TILE * SCALE;   // 96px display per tile
 
 // ─────────────────────────────────────────────
+//  Basic elements — hotbar abilities unlocked on level-up
+// ─────────────────────────────────────────────
+// Range is stated in the same "range" unit as melee weapons (Wooden
+// Sword = 3); 1 unit = 32px, so a projectile travels range*32 px before
+// despawning.  Reload is in ms.  Speed is a display/travel-feel choice,
+// not part of the spec — projectiles cross their full range in ~0.5s.
+const ELEMENT_DEFS = {
+  fire:  { icon: 'icon_fire',  damage: 5, range: 10, reload: 3000, speed: 640, burn: { ticks: 3, dmgPerTick: 1, tickMs: 1000 } },
+  water: { icon: 'icon_water', damage: 2, range: 8,  reload: 2000, speed: 512, knockback: 260 },
+  air:   { icon: 'icon_air',   damage: 1, range: 5,  reload: 500,  speed: 320, knockback: 320 },
+  earth: { icon: 'icon_earth', damage: 8, range: 15, reload: 5000, speed: 960 },
+};
+
+// ─────────────────────────────────────────────
 //  Auth / progress persistence (localStorage)
 // ─────────────────────────────────────────────
 // localStorage is per-origin + per-browser profile, so "max accounts per
@@ -238,10 +252,12 @@ class PreloadScene extends Phaser.Scene {
     this.load.image('shield_overlay',  'assets/Shield.png');
     this.load.spritesheet('blue_fireball', 'assets/Blue_Fireball.png', { frameWidth: 32, frameHeight: 32 });
     this.load.spritesheet('bow',           'assets/Bow.png',           { frameWidth: 32, frameHeight: 32 });
-    this.load.image('proj_fire',  'assets/Fireball.png');
-    this.load.image('proj_water', 'assets/Wave-1.png.png');
-    this.load.image('proj_air',   'assets/Air-1.png.png');
-    this.load.image('proj_earth', 'assets/Crack-1.png.png');
+    // Element icons — looping idle spritesheets, 32x32 frames. Reused for
+    // both the hotbar/choice-screen icon and the fired projectile itself.
+    this.load.spritesheet('icon_fire',  'assets/elements/Fire.png',  { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('icon_water', 'assets/elements/Water.png', { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('icon_air',   'assets/elements/Air.png',   { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('icon_earth', 'assets/elements/Earth.png', { frameWidth: 32, frameHeight: 32 });
   }
 
   create() {
@@ -294,10 +310,10 @@ class PreloadScene extends Phaser.Scene {
     makeImg  ('shield_overlay',  0x886633, 32, 32);
     makeSheet('blue_fireball', 0x44aaff, 2, 32, 32);
     makeSheet('bow',           0x884422, 2, 32, 32);
-    makeImg  ('proj_fire',     0xff5522, 16, 16);
-    makeImg  ('proj_water',    0x3399ff, 32, 32);
-    makeImg  ('proj_air',      0xffffff, 32, 32);
-    makeImg  ('proj_earth',    0x77aa44, 32, 32);
+    makeSheet('icon_fire',     0xff5522, 2, 32, 32);
+    makeSheet('icon_water',    0x3399ff, 3, 32, 32);
+    makeSheet('icon_air',      0xeeeeee, 1, 32, 32);
+    makeSheet('icon_earth',    0x77aa44, 3, 32, 32);
   }
 }
 
@@ -438,6 +454,7 @@ class GameScene extends Phaser.Scene {
     this.movingPlatform = null;    // moving platform sprite
     this._shieldOverlay = null;    // block-stance shield (lazy-built)
     this._level2Complete = false;
+    this._hotbar = null;           // 10-slot element hotbar (rebuilt in create())
   }
 
   create() {
@@ -482,13 +499,13 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    // Selected primary element (Fire/Water/Air/Earth). Empty until the
-    // L2 first-chest level-up cinematic, then persists across runs.
-    this._element = _saved.element || '';
+    // Hotbar — 10 slots, filled left-to-right one at a time on level-up.
+    // Each filled slot is { element, cooldownRemaining }; empty = null.
+    const _savedHotbar = Array.isArray(_saved.hotbar) ? _saved.hotbar : [];
+    this._hotbar = new Array(10).fill(null).map((_, i) =>
+      _savedHotbar[i] ? { element: _savedHotbar[i], cooldownRemaining: 0 } : null);
     // Block state — set true while the player holds T or '/'
     this._blocking = false;
-    // Per-element cooldowns so the player can't spam
-    this._elementCooldown = 0;
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
     this.cameras.main.setBackgroundColor(0xeef8ff);
@@ -582,19 +599,17 @@ class GameScene extends Phaser.Scene {
       comma: Phaser.Input.Keyboard.KeyCodes.COMMA,
       t: Phaser.Input.Keyboard.KeyCodes.T,
       slash: Phaser.Input.Keyboard.KeyCodes.FORWARD_SLASH,
-      one: Phaser.Input.Keyboard.KeyCodes.ONE,
+      one:   Phaser.Input.Keyboard.KeyCodes.ONE,
+      two:   Phaser.Input.Keyboard.KeyCodes.TWO,
+      three: Phaser.Input.Keyboard.KeyCodes.THREE,
+      four:  Phaser.Input.Keyboard.KeyCodes.FOUR,
+      five:  Phaser.Input.Keyboard.KeyCodes.FIVE,
+      six:   Phaser.Input.Keyboard.KeyCodes.SIX,
+      seven: Phaser.Input.Keyboard.KeyCodes.SEVEN,
+      eight: Phaser.Input.Keyboard.KeyCodes.EIGHT,
     });
     this._jumpHeld = false;
     this._spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-    // Mouse click fires the selected element (level 2).  Set an
-    // edge-flag here, consumed once per frame in _tryFireElement, so a
-    // single click maps to a single shot regardless of frame timing.
-    this._firePointerQueued = false;
-    this.input.on('pointerdown', () => {
-      if (this._dialog && this._dialog.active) return;
-      if (this._chestSequenceActive || this._portalReached) return;
-      this._firePointerQueued = true;
-    });
     this._dummyDialogTriggered       = false;
     this._patrolDummyDialogTriggered = false;
 
@@ -946,8 +961,10 @@ class GameScene extends Phaser.Scene {
     const barFg = this.add.rectangle(0, 0, 70, 9, 0xff3333).setOrigin(0,   1).setDepth(15).setVisible(false);
     const barLb = this.add.text(0, 0, '', { fontSize: '9px', fontFamily: 'monospace', color: '#ffbbbb' })
       .setOrigin(0.5, 1).setDepth(15).setVisible(false);
+    // Small flame icon shown beside the healthbar while burning.
+    const fireIcon = this.add.image(0, 0, 'icon_fire', 0).setScale(1.4).setDepth(15).setVisible(false);
     const rd = { sprite, hp: maxHp, maxHp, dead: false, fireTimer: 0,
-                 bar: { bg: barBg, fg: barFg, label: barLb } };
+                 bar: { bg: barBg, fg: barFg, label: barLb, fireIcon }, burn: null };
     // Stagger the two dummies so they don't fire in unison.
     rd.fireTimer = 1500 + Math.random() * 1500;
     return rd;
@@ -959,6 +976,7 @@ class GameScene extends Phaser.Scene {
       const b = rd.bar;
       if (rd.dead || !rd.sprite.active) {
         b.bg.setVisible(false); b.fg.setVisible(false); b.label.setVisible(false);
+        b.fireIcon.setVisible(false);
         continue;
       }
       const ds = rd.sprite, barW = 70;
@@ -966,6 +984,37 @@ class GameScene extends Phaser.Scene {
       b.bg.setPosition(bx, by).setSize(barW, 9).setVisible(true);
       b.fg.setPosition(bx - barW / 2, by).setSize(barW * rd.hp / rd.maxHp, 9).setVisible(true);
       b.label.setPosition(bx, by - 9).setText(`HP: ${rd.hp} / ${rd.maxHp}`).setVisible(true);
+      b.fireIcon.setPosition(bx + barW / 2 + 12, by).setVisible(!!rd.burn);
+    }
+  }
+
+  // Tick fire burn DOT on ranged dummies: 1 dmg/sec for a few seconds.
+  _updateBurns(delta) {
+    if (!this.rangedDummies) return;
+    for (const rd of this.rangedDummies) {
+      if (rd.dead || !rd.burn) continue;
+      rd.burn.msLeft -= delta;
+      if (rd.burn.msLeft <= 0) {
+        this._damageRangedDummy(rd, rd.burn.dmgPerTick);
+        rd.burn.ticksLeft -= 1;
+        if (rd.burn.ticksLeft > 0 && !rd.dead) rd.burn.msLeft += rd.burn.tickMs;
+        else rd.burn = null;
+      }
+    }
+  }
+
+  // Apply damage to a ranged dummy and kill it if HP hits 0. Shared by
+  // element hits and burn ticks.
+  _damageRangedDummy(rd, dmg) {
+    if (rd.dead) return;
+    rd.hp = Math.max(0, rd.hp - dmg);
+    if (rd.hp <= 0) {
+      rd.dead = true;
+      rd.burn = null;
+      this.tweens.add({
+        targets: rd.sprite, angle: 90, alpha: 0, duration: 360, ease: 'Power2',
+        onComplete: () => rd.sprite.destroy(),
+      });
     }
   }
 
@@ -1294,6 +1343,11 @@ class GameScene extends Phaser.Scene {
     add('dummy_hit',    'dummy',         1, 1,  4, 0);
     add('chest_closed', 'chest',         0, 0,  4);
     add('chest_open',   'chest',         1, 1,  4, 0);
+    // Element hotbar/choice-screen icons — looping idle animations.
+    add('icon_fire',  'icon_fire',  0, 1, 6);
+    add('icon_water', 'icon_water', 0, 2, 6);
+    add('icon_air',   'icon_air',   0, 0, 6);
+    add('icon_earth', 'icon_earth', 0, 2, 6);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -1652,8 +1706,13 @@ class GameScene extends Phaser.Scene {
   // projectile cleanup, moving platform reversal, element cooldown.
   _updateLevel2(delta) {
     if (this._levelNum !== 2) return;
-    if (this._elementCooldown > 0) this._elementCooldown -= delta;
+    if (this._hotbar) {
+      for (const slot of this._hotbar) {
+        if (slot && slot.cooldownRemaining > 0) slot.cooldownRemaining = Math.max(0, slot.cooldownRemaining - delta);
+      }
+    }
     this._updateRangedBars();
+    this._updateBurns(delta);
 
     // ── Ranged dummies: shoot a fireball every ~3s ────────────────
     if (this.rangedDummies) {
@@ -1801,24 +1860,20 @@ class GameScene extends Phaser.Scene {
   _onElementHitDummy(rd, pr) {
     if (rd.dead || !pr || !pr.active) return;
     const dmg = pr._damage || 1;
-    // Earth + Air can pierce; Fire/Water single-hit
-    const pierce = !!pr._pierce;
-    rd.hp = Math.max(0, rd.hp - dmg);
-    if (!pierce) pr.destroy();
+    pr.destroy();
     rd.sprite.setTintFill(0xffffff);
     this.time.delayedCall(80, () => { if (!rd.dead) rd.sprite.clearTint(); });
-    // Knockback for Air
+    // Knockback for Water/Air
     if (pr._knockback) {
       rd.sprite.body.setVelocityX(pr._dir * pr._knockback);
       this.time.delayedCall(200, () => { if (rd.sprite?.active) rd.sprite.body.setVelocityX(0); });
     }
-    if (rd.hp <= 0) {
-      rd.dead = true;
-      this.tweens.add({
-        targets: rd.sprite, angle: 90, alpha: 0, duration: 360, ease: 'Power2',
-        onComplete: () => rd.sprite.destroy(),
-      });
+    // Fire applies a burn DOT — refreshes rather than stacks on repeat hits.
+    if (pr._burn) {
+      rd.burn = { ticksLeft: pr._burn.ticks, dmgPerTick: pr._burn.dmgPerTick,
+                  tickMs: pr._burn.tickMs, msLeft: pr._burn.tickMs };
     }
+    this._damageRangedDummy(rd, dmg);
   }
 
   _isShielded() {
@@ -1860,60 +1915,41 @@ class GameScene extends Phaser.Scene {
     this._shieldOverlay.setDepth(s.depth + 2);
   }
 
-  // Spawn the currently-selected element projectile.  Called by
-  // updatePlayer when the player clicks (mouse) or presses '1'.
-  _fireElement() {
-    if (!this._element) return;
-    if (this._elementCooldown > 0) return;
-    if (!this.elementProjectiles) return;
+  // Fire whichever element sits in hotbar slot `idx` (0-based). Called by
+  // key-press handling in _tryFireElement and by HUD slot clicks.
+  _fireElementInSlot(idx) {
+    if (this._levelNum !== 2 || !this.elementProjectiles) return;
+    const slot = this._hotbar && this._hotbar[idx];
+    if (!slot || slot.cooldownRemaining > 0) return;
+    const def = ELEMENT_DEFS[slot.element];
+    if (!def) return;
+    slot.cooldownRemaining = def.reload;
+
     const ps = this.player.sprite;
     const dir = ps.flipX ? 1 : -1;
-    const defs = {
-      fire:  { tex: 'proj_fire',  speed: 480, dmg: 3, range: 240, cd: 700,  scale: SCALE * 1.0 },
-      water: { tex: 'proj_water', speed: 420, dmg: 2, range: 520, cd: 650,  scale: SCALE * 0.9 },
-      air:   { tex: 'proj_air',   speed: 540, dmg: 1, range: 220, cd: 500,  scale: SCALE * 0.85, knockback: 380, pierce: true },
-      earth: { tex: 'proj_earth', speed: 360, dmg: 5, range: 240, cd: 900,  scale: SCALE * 0.95, pierce: true, snake: true },
-    };
-    const def = defs[this._element];
-    if (!def) return;
-    this._elementCooldown = def.cd;
-
     const startX = ps.x + dir * 36;
-    const startY = def.snake ? ps.body.bottom - 8 : ps.y;
-    const pr = this.elementProjectiles.create(startX, startY, def.tex);
+    const pr = this.elementProjectiles.create(startX, ps.y, def.icon, 0);
     if (!pr) return;
-    pr.setScale(def.scale);
+    pr.play(def.icon);
+    pr.setScale(SCALE * 0.6);
     pr.setFlipX(dir < 0);
     pr.body.setAllowGravity(false);
     pr.body.setVelocityX(dir * def.speed);
     pr._dir = dir;
-    pr._damage = def.dmg;
-    pr._maxX = startX + dir * def.range;
+    pr._damage = def.damage;
+    pr._maxX = startX + dir * def.range * 32;
     if (def.knockback) pr._knockback = def.knockback;
-    if (def.pierce) pr._pierce = true;
-    // Earth "snakes" — sine-wave Y oscillation along the ground
-    if (def.snake) {
-      pr._snakeY = startY;
-      const baseY = startY;
-      this.tweens.add({
-        targets: pr, y: baseY - 6, duration: 110, yoyo: true, repeat: -1,
-        ease: 'Sine.easeInOut',
-      });
-    }
-    // Element-specific muzzle tint
-    const tint = { fire: 0xff8844, water: 0x66ccff, air: 0xffffff, earth: 0x99cc66 }[this._element];
-    if (tint) pr.setTint(tint);
+    if (def.burn) pr._burn = def.burn;
   }
 
-  // Fire the selected element when the player taps '1' or clicks.  Both
-  // are edge-triggered (JustDown / a per-frame pointer flag) so holding
-  // doesn't auto-fire — the cooldown in _fireElement still gates rate.
+  // Fire keys '1'-'8' → hotbar slots 0-7. Edge-triggered so holding
+  // doesn't auto-fire — the per-slot cooldown still gates rate anyway.
   _tryFireElement(k) {
-    if (this._levelNum !== 2 || !this._element) return;
-    const keyOne   = k && k.one && Phaser.Input.Keyboard.JustDown(k.one);
-    const clicked  = this._firePointerQueued;
-    this._firePointerQueued = false;
-    if (keyOne || clicked) this._fireElement();
+    if (this._levelNum !== 2 || !k) return;
+    const slotKeys = [k.one, k.two, k.three, k.four, k.five, k.six, k.seven, k.eight];
+    for (let i = 0; i < slotKeys.length; i++) {
+      if (slotKeys[i] && Phaser.Input.Keyboard.JustDown(slotKeys[i])) this._fireElementInSlot(i);
+    }
   }
 
   // Drive the sword overlay through an asymmetric arc on each swing:
@@ -2402,6 +2438,7 @@ class GameScene extends Phaser.Scene {
   _playChestSequence(opts) {
     if (this._chestSequenceActive) return;
     this._chestSequenceActive = true;
+    this._pendingElementChoices = 0;   // incremented once per level-up below
 
     const W = this.scale.width, H = this.scale.height;
     const cx = W / 2, cy = H / 2;
@@ -2565,6 +2602,7 @@ class GameScene extends Phaser.Scene {
   _chestLevelUp(ctx, done) {
     const { cx, cy, BIG_W, BIG_H, xpToNext, barFill, barText } = ctx;
     this._level += 1;
+    this._pendingElementChoices = (this._pendingElementChoices || 0) + 1;
     const lvlText = ctx.add(this.add.text(cx, cy - 70, 'Level UP!', {
       fontSize: '46px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffd166', stroke: '#000000', strokeThickness: 6,
@@ -2643,10 +2681,90 @@ class GameScene extends Phaser.Scene {
       this._chestSkipHandler = null;
       this.tweens.add({
         targets: ctx.layer, alpha: 0, duration: 280,
-        onComplete: () => { ctx.cleanup(); this._chestSequenceActive = false; },
+        onComplete: () => {
+          ctx.cleanup();
+          this._runPendingElementChoices();
+        },
       });
     };
     this.time.delayedCall(1600, () => this._chestDismiss && this._chestDismiss());
+  }
+
+  // After the chest cinematic fully dismisses, show one "choose a basic
+  // element" screen per level gained during it, in sequence. Keeps
+  // _chestSequenceActive true (freezing player input) until all are
+  // resolved, then releases control back to the player.
+  _runPendingElementChoices() {
+    if (this._pendingElementChoices > 0) {
+      this._pendingElementChoices -= 1;
+      this._playElementChoiceScreen(() => this._runPendingElementChoices());
+    } else {
+      this._chestSequenceActive = false;
+    }
+  }
+
+  // "You leveled up! Choose a basic element." — dim screen + 4 bordered
+  // icon squares (Fire/Water/Air/Earth). Clicking one drops it into the
+  // next empty hotbar slot and persists it, then calls done().
+  _playElementChoiceScreen(done) {
+    const emptySlot = this._hotbar.findIndex(s => !s);
+    if (emptySlot === -1) { done(); return; }   // hotbar full — nothing to assign
+
+    const W = this.scale.width, H = this.scale.height;
+    const cx = W / 2, cy = H / 2;
+    const D  = 1000;
+    const layer = [];
+    const add = obj => { obj.setScrollFactor(0).setDepth(D); layer.push(obj); return obj; };
+
+    const dim = add(this.add.rectangle(0, 0, W, H, 0x000000, 0).setOrigin(0));
+    this.tweens.add({ targets: dim, fillAlpha: 0.66, duration: 280, ease: 'Sine.easeOut' });
+
+    const msg = add(this.add.text(cx, cy - 90, 'You leveled up!\nChoose a basic element.', {
+      fontSize: '22px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', stroke: '#000000', strokeThickness: 4, align: 'center',
+    }).setOrigin(0.5).setAlpha(0));
+    this.tweens.add({ targets: msg, alpha: 1, duration: 320 });
+
+    const options = [
+      { key: 'fire',  icon: 'icon_fire',  label: 'Fire'  },
+      { key: 'water', icon: 'icon_water', label: 'Water' },
+      { key: 'air',   icon: 'icon_air',   label: 'Air'   },
+      { key: 'earth', icon: 'icon_earth', label: 'Earth' },
+    ];
+    const boxSize = 84, gap = 24;
+    const rowW = options.length * boxSize + (options.length - 1) * gap;
+    const startX = cx - rowW / 2 + boxSize / 2;
+
+    let resolved = false;
+    const cleanup = () => layer.forEach(o => o.destroy());
+    const choose = (elKey) => {
+      if (resolved) return;
+      resolved = true;
+      this._hotbar[emptySlot] = { element: elKey, cooldownRemaining: 0 };
+      saveProgress({ hotbar: this._hotbar.map(s => s ? s.element : null) });
+      this.tweens.add({
+        targets: layer, alpha: 0, duration: 220,
+        onComplete: () => { cleanup(); done(); },
+      });
+    };
+
+    options.forEach((opt, i) => {
+      const bx = startX + i * (boxSize + gap);
+      const box = add(this.add.rectangle(bx, cy + 30, boxSize, boxSize, 0x333333)
+        .setStrokeStyle(3, 0xffffff)
+        .setInteractive({ useHandCursor: true })
+        .setAlpha(0));
+      const icon = add(this.add.sprite(bx, cy + 18, opt.icon, 0).setScale(1.6).setAlpha(0));
+      icon.play(opt.icon);
+      const label = add(this.add.text(bx, cy + 30 + boxSize / 2 - 14, opt.label, {
+        fontSize: '13px', fontFamily: '"Arial Black", Arial, sans-serif',
+        color: '#ffffff', stroke: '#000000', strokeThickness: 3,
+      }).setOrigin(0.5).setAlpha(0));
+      this.tweens.add({ targets: [box, icon, label], alpha: 1, duration: 320, delay: 120 + i * 60, ease: 'Back.easeOut' });
+      box.on('pointerover', () => box.setFillStyle(0x4a4a4a));
+      box.on('pointerout',  () => box.setFillStyle(0x333333));
+      box.on('pointerup',   () => choose(opt.key));
+    });
   }
 
   reachPortal() {
@@ -3106,13 +3224,21 @@ class HUDScene extends Phaser.Scene {
     const slotRowW  = 10 * slotSize + 9 * slotGap;                 // 256
     const slotStart = BAR_X + Math.round((BAR_W - slotRowW) / 2);  // 272 (2px in from bar edge)
     const slotY     = panelY + 65;
+    this.hotbarSlots = [];
     for (let i = 0; i < 10; i++) {
       const sx = slotStart + i * (slotSize + slotGap);
-      this.add.rectangle(sx, slotY, slotSize, slotSize, 0x8b98a7)
+      const rect = this.add.rectangle(sx, slotY, slotSize, slotSize, 0x8b98a7)
         .setOrigin(0, 0.5)
         .setStrokeStyle(2, 0x000000)
         .setInteractive({ useHandCursor: true })
-        .on('pointerup', () => { /* TODO: elements */ });
+        .on('pointerup', () => this._gs && this._gs._fireElementInSlot(i));
+      const icon = this.add.sprite(sx + slotSize / 2, slotY, 'icon_fire', 0)
+        .setScale(0.55).setVisible(false);
+      const darken = this.add.rectangle(sx, slotY, slotSize, slotSize, 0x000000, 0.55)
+        .setOrigin(0, 0.5).setVisible(false);
+      const reloadBar = this.add.rectangle(sx, slotY + slotSize / 2, slotSize, 0, 0x33aaff)
+        .setOrigin(0, 1).setVisible(false);
+      this.hotbarSlots.push({ rect, icon, darken, reloadBar, element: null });
     }
 
     // ── Effects placeholder area (right side) ─────
@@ -3166,6 +3292,27 @@ class HUDScene extends Phaser.Scene {
     if (paused && this.pauseIcon.text !== '▶') this.pauseIcon.setText('▶');
     if (!paused && this.pauseIcon.text !== '⏸') this.pauseIcon.setText('⏸');
     this.pausedText.setVisible(paused);
+
+    // Hotbar: icon + darken/reload-bar overlay per slot
+    if (gs._hotbar) {
+      this.hotbarSlots.forEach((s, i) => {
+        const slot = gs._hotbar[i];
+        if (!slot) { s.icon.setVisible(false); s.darken.setVisible(false); s.reloadBar.setVisible(false); return; }
+        const def = ELEMENT_DEFS[slot.element];
+        if (s.element !== slot.element) {
+          s.element = slot.element;
+          s.icon.setVisible(true).play(def.icon);
+        }
+        const onCooldown = slot.cooldownRemaining > 0;
+        s.darken.setVisible(onCooldown);
+        s.reloadBar.setVisible(onCooldown);
+        if (onCooldown) {
+          const size = s.rect.height;
+          const frac = 1 - (slot.cooldownRemaining / def.reload);
+          s.reloadBar.setSize(size, size * Phaser.Math.Clamp(frac, 0, 1));
+        }
+      });
+    }
   }
 }
 
