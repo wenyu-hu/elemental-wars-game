@@ -642,6 +642,18 @@ class GameScene extends Phaser.Scene {
       gravityY:  400,
       emitting:  false,
     }).setDepth(2);
+
+    // Catch-up for existing players who reached level 1 before the
+    // element system existed: their hotbar is still empty even though
+    // they've already "earned" a pick. Show the choice screen once,
+    // shortly after load, instead of only on live level-up events.
+    if (this._levelNum === 2 && this._level >= 1 && this._hotbar.every(s => !s)) {
+      this.time.delayedCall(600, () => {
+        if (this._chestSequenceActive) return;   // don't clash with an active cinematic
+        this._chestSequenceActive = true;
+        this._playElementChoiceScreen(() => { this._chestSequenceActive = false; });
+      });
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────
