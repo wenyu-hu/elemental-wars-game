@@ -342,12 +342,12 @@ class MenuScene extends Phaser.Scene {
     this.add.rectangle(0, height-54, width, 54, 0x6dbf67).setOrigin(0);
     this.add.rectangle(0, height-54, width,  9, 0x52a84f).setOrigin(0);
 
-    this.add.text(width/2, height/2-90, 'ELEMENTAL WARS', {
+    const titleText = this.add.text(width/2, height/2-90, 'ELEMENTAL WARS', {
       fontSize: '42px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ff5722', stroke: '#ffffff', strokeThickness: 7
     }).setOrigin(0.5);
 
-    this.add.text(width/2, height/2-38, 'Tutorial Level', {
+    const subtitleText = this.add.text(width/2, height/2-38, 'Tutorial Level', {
       fontSize: '20px', fontFamily: 'Arial, sans-serif', color: '#2d6a4f'
     }).setOrigin(0.5);
 
@@ -399,25 +399,72 @@ class MenuScene extends Phaser.Scene {
     const startGame = () => this.scene.start('MapScene');
 
     if (user) {
-      this.add.text(width/2, height/2 - 5, `Welcome back, ${user.username}!`, {
+      const mainMenuObjects = [titleText, subtitleText];
+      mainMenuObjects.push(this.add.text(width/2, height/2 - 5, `Welcome back, ${user.username}!`, {
         fontSize: '16px', fontFamily: '"Arial Black", Arial, sans-serif',
         color: '#2d6a4f', stroke: '#ffffff', strokeThickness: 3
-      }).setOrigin(0.5);
-      makeBtn(height/2 + 40, 'PLAY',    '#ff5722', '#e64a19', startGame);
-      // Skin picker — unlocked for any account that has logged in.
-      let skinChoice = progress.skin === 'female' ? 'female' : 'default';
-      const skinLabel = s => s === 'female' ? 'SKIN: FEMALE' : 'SKIN: DEFAULT';
-      const skinBtn = makeBtn(height/2 + 95, skinLabel(skinChoice), '#9c6ade', '#8148c9', () => {
-        skinChoice = skinChoice === 'female' ? 'default' : 'female';
-        saveProgress({ skin: skinChoice });
-        skinBtn.setText(`  ${skinLabel(skinChoice)}  `);
-      });
-      makeBtn(height/2 + 150, 'LOG OUT', '#8c8c8c', '#6c6c6c', () => {
+      }).setOrigin(0.5));
+      mainMenuObjects.push(makeBtn(height/2 + 40,  'PLAY',    '#ff5722', '#e64a19', startGame));
+      mainMenuObjects.push(makeBtn(height/2 + 95,  'SKINS',   '#9c6ade', '#8148c9', () => showSkinPicker()));
+      mainMenuObjects.push(makeBtn(height/2 + 150, 'LOG OUT', '#8c8c8c', '#6c6c6c', () => {
         logOut();
         this.scene.restart();
-      });
+      }));
       this.input.keyboard.once('keydown-ENTER', startGame);
       this.input.keyboard.once('keydown-SPACE', startGame);
+
+      // ── Skin picker panel (hidden until "SKINS" is clicked) ──────
+      // Unlocked for any account that has logged in. Shows both skins
+      // side by side with a live preview frame; the selected one gets a
+      // gold border. Clicking a card selects it immediately.
+      let skinChoice = progress.skin === 'female' ? 'female' : 'default';
+      const panelObjects = [];
+      const cardW = 160, cardH = 200, gap = 30;
+      const cards = {};
+      const skinDefs = [
+        { key: 'default', label: 'Default', tex: 'player_idle' },
+        { key: 'female',  label: 'Female',  tex: 'player_female' },
+      ];
+      const rowW = cardW * skinDefs.length + gap * (skinDefs.length - 1);
+      const startX = width/2 - rowW/2 + cardW/2;
+
+      panelObjects.push(this.add.text(width/2, height/2 - 110, 'Choose your skin', {
+        fontSize: '22px', fontFamily: '"Arial Black", Arial, sans-serif',
+        color: '#2d6a4f', stroke: '#ffffff', strokeThickness: 4
+      }).setOrigin(0.5));
+
+      const selectSkin = (skinKey) => {
+        skinChoice = skinKey;
+        saveProgress({ skin: skinKey });
+        skinDefs.forEach(def => {
+          cards[def.key].border.setStrokeStyle(4, def.key === skinKey ? 0xffd700 : 0xcccccc);
+        });
+      };
+
+      skinDefs.forEach((def, i) => {
+        const cx = startX + i * (cardW + gap);
+        const cy = height/2 + 5;
+        const border = this.add.rectangle(cx, cy, cardW, cardH, 0xffffff)
+          .setStrokeStyle(4, def.key === skinChoice ? 0xffd700 : 0xcccccc)
+          .setInteractive({ useHandCursor: true });
+        const preview = this.add.image(cx, cy, def.tex, 0).setScale(4);
+        border.on('pointerup', () => selectSkin(def.key));
+        cards[def.key] = { border, preview };
+        panelObjects.push(border, preview);
+      });
+
+      const backBtn = makeBtn(height/2 + 145, 'BACK', '#8c8c8c', '#6c6c6c', () => hideSkinPicker());
+      panelObjects.push(backBtn);
+      panelObjects.forEach(o => o.setVisible(false));
+
+      function showSkinPicker() {
+        mainMenuObjects.forEach(o => o.setVisible(false));
+        panelObjects.forEach(o => o.setVisible(true));
+      }
+      function hideSkinPicker() {
+        panelObjects.forEach(o => o.setVisible(false));
+        mainMenuObjects.forEach(o => o.setVisible(true));
+      }
     } else {
       makeBtn(height/2 + 10, 'LOG IN', '#3b9fff', '#1e7ae5', () => {
         showAuthForm({ mode: 'login',  onSuccess: () => this.scene.restart() });
