@@ -236,6 +236,10 @@ class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('player_attack',        'assets/attack.png',        { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('player_weapon_attack', 'assets/weapon_attack.png', { frameWidth: 32, frameHeight: 32 });
     this.load.spritesheet('player_duck',   'assets/duck.png',   { frameWidth: 18, frameHeight: 31 });
+    // Female skin — unlocked for any account that has logged in. Single
+    // combined sheet, cropped to the same 18x31 frame size as the
+    // default skin so all hitbox math applies unchanged.
+    this.load.spritesheet('player_female', 'assets/Main Character - Female Skin.png', { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('dummy',         'assets/dummy.png',  { frameWidth: 27, frameHeight: 25 });
     this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 14, frameHeight: 16 });
     this.load.image('item_wooden_sword',  'assets/Sword.png');
@@ -296,6 +300,7 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('player_attack',        0xff8844, 4, 18, 31);
     makeSheet('player_weapon_attack', 0xffaa44, 3, 32, 32);
     makeSheet('player_duck',   0x2266cc, 1, 18, 31);
+    makeSheet('player_female', 0xff69b4, 10, 18, 31);
     makeSheet('dummy',         0xcc4444, 2, 27, 25);
     makeSheet('chest',         0xcc9922, 2, 14, 16);
     makeImg  ('ground',        0x4a9944, 32, 32);
@@ -399,7 +404,15 @@ class MenuScene extends Phaser.Scene {
         color: '#2d6a4f', stroke: '#ffffff', strokeThickness: 3
       }).setOrigin(0.5);
       makeBtn(height/2 + 40, 'PLAY',    '#ff5722', '#e64a19', startGame);
-      makeBtn(height/2 + 95, 'LOG OUT', '#8c8c8c', '#6c6c6c', () => {
+      // Skin picker — unlocked for any account that has logged in.
+      let skinChoice = progress.skin === 'female' ? 'female' : 'default';
+      const skinLabel = s => s === 'female' ? 'SKIN: FEMALE' : 'SKIN: DEFAULT';
+      const skinBtn = makeBtn(height/2 + 95, skinLabel(skinChoice), '#9c6ade', '#8148c9', () => {
+        skinChoice = skinChoice === 'female' ? 'default' : 'female';
+        saveProgress({ skin: skinChoice });
+        skinBtn.setText(`  ${skinLabel(skinChoice)}  `);
+      });
+      makeBtn(height/2 + 150, 'LOG OUT', '#8c8c8c', '#6c6c6c', () => {
         logOut();
         this.scene.restart();
       });
@@ -506,6 +519,10 @@ class GameScene extends Phaser.Scene {
       _savedHotbar[i] ? { element: _savedHotbar[i], cooldownRemaining: 0 } : null);
     // Block state — set true while the player holds T or '/'
     this._blocking = false;
+
+    // Selected player skin — 'default' or 'female' (unlocked for any
+    // account that has logged in, chosen from the main menu).
+    this._skin = _saved.skin === 'female' ? 'female' : 'default';
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
     this.cameras.main.setBackgroundColor(0xeef8ff);
@@ -622,7 +639,7 @@ class GameScene extends Phaser.Scene {
     this.events.once('shutdown', () => this.scene.stop('HUDScene'));
 
     this.buildAnims();
-    this.player.sprite.anims.play('idle', true);
+    this.player.sprite.anims.play(this._animKey('idle'), true);
     if (this.dummy) this.dummy.sprite.anims.play('dummy_idle', true);
     if (this.chest) this.chest.sprite.anims.play('chest_closed', true);
     if (this.chestL2A) this.chestL2A.sprite.anims.play('chest_closed', true);
@@ -1351,6 +1368,31 @@ class GameScene extends Phaser.Scene {
     add('duck',         'player_duck',   0, 0,  4);
     // Static block stance — the extended-fist attack frame, held.
     add('block',        'player_attack', 3, 3,  4, 0);
+
+    // ── Female skin — single combined sheet (frames per the user's list,
+    // 0-indexed): 0 idle, 1-2 weapon-attack (1 shared with bare-fist
+    // attack), 3 duck, 4 bare-fist attack frame 2, 5 unused spare idle,
+    // 6-7 jump, 8-9 walk. Fewer frames than the default skin, so walk/jump
+    // are simpler 2-frame cycles instead of 3-4 frame ones.
+    add('idle_f',  'player_female', 0, 0, 4);
+    add('duck_f',  'player_female', 3, 3, 4);
+    add('walk_f',  'player_female', 8, 9, 8);
+    add('jump_f',  'player_female', 6, 7, 6, 0);
+    if (!this.anims.exists('attack_f')) {
+      this.anims.create({
+        key: 'attack_f', frameRate: 12, repeat: 0,
+        frames: [1, 4].map(f => ({ key: 'player_female', frame: f })),
+      });
+    }
+    if (!this.anims.exists('weapon_attack_f')) {
+      this.anims.create({
+        key: 'weapon_attack_f', frameRate: 15, repeat: 0,
+        frames: [1, 2, 1].map(f => ({ key: 'player_female', frame: f })),
+      });
+    }
+    // Static block stance — reuses the unique bare-fist attack frame.
+    add('block_f', 'player_female', 4, 4, 4, 0);
+
     add('dummy_idle',   'dummy',         0, 0,  4);
     add('dummy_hit',    'dummy',         1, 1,  4, 0);
     add('chest_closed', 'chest',         0, 0,  4);
@@ -1990,6 +2032,18 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  // Map a semantic animation name to the actual Phaser anim key for the
+  // currently selected skin (e.g. 'duck' -> 'duck_f' when playing as the
+  // female skin), and the reverse — strip a skin suffix back down to the
+  // semantic name for lookups (POSE table, sheathed-check) that only key
+  // off the base name.
+  _animKey(base) {
+    return this._skin === 'female' ? base + '_f' : base;
+  }
+  _animBase(key) {
+    return (key && key.endsWith('_f')) ? key.slice(0, -2) : key;
+  }
+
   // Re-centre the 14×27 hitbox inside whatever frame the sprite is
   // currently displaying.  Cheap to call every tick (idempotent when
   // the frame width hasn't changed), and crucially closes the
@@ -2023,7 +2077,7 @@ class GameScene extends Phaser.Scene {
     if ((k.e.isDown || k.comma.isDown) && p.attackCooldown <= 0) {
       p.isAttacking = true; p.attackCooldown = 600;
       const armed   = this._isArmedMelee();
-      const animKey = armed ? 'weapon_attack' : 'attack';
+      const animKey = this._animKey(armed ? 'weapon_attack' : 'attack');
       s.anims.play(animKey, true);
       s.once('animationcomplete-' + animKey, () => { p.isAttacking = false; });
       this.time.delayedCall(200, () => this.checkAttackHit());
@@ -2040,7 +2094,7 @@ class GameScene extends Phaser.Scene {
     if (this._levelNum === 2 && (k.t.isDown || k.slash.isDown) && onGround) {
       this._tryFireElement(k);
       this.applyHorizontalMove(p, k, 1);
-      s.anims.play('block', true);
+      s.anims.play(this._animKey('block'), true);
       // Make sure the standing hitbox is restored — block must not leave
       // the player crouched if they pressed T mid-duck.
       if (s.body.sourceHeight !== 27 && this._hasStandHeadroom(s)) {
@@ -2058,7 +2112,7 @@ class GameScene extends Phaser.Scene {
     if (jp && !this._jumpHeld && p.jumpsLeft > 0) {
       bod.setVelocityY(-Math.sqrt(2 * Math.abs(this.physics.world.gravity.y) * TS));
       p.jumpsLeft--;
-      s.anims.play('jump', true);
+      s.anims.play(this._animKey('jump'), true);
       // ── Stretch on jump launch ────────────────────────────────
       this.stretchPlayer();
     }
@@ -2069,7 +2123,7 @@ class GameScene extends Phaser.Scene {
       // the body's vertical extent so the player fits under low
       // overhead platforms (level 2).  Width stays 14; height drops
       // 27 → 14 with the offset pushed down so the feet stay put.
-      s.anims.play('duck', true);
+      s.anims.play(this._animKey('duck'), true);
       // NOTE: body.height is the *scaled* height (14·SCALE); the unscaled
       // value we set lives in body.sourceHeight — compare against that.
       if (s.body.sourceHeight !== 14) {
@@ -2092,7 +2146,7 @@ class GameScene extends Phaser.Scene {
       if (this._hasStandHeadroom(s)) {
         s.body.setSize(14, 27).setOffset((s.frame.width - 14) / 2, 2);
       } else {
-        s.anims.play('duck', true);
+        s.anims.play(this._animKey('duck'), true);
         this.applyHorizontalMove(p, k, 0.4);
         this._updateWeaponOverlay();
         this._tryFireElement(k);
@@ -2107,11 +2161,12 @@ class GameScene extends Phaser.Scene {
     // a direction key is pressed (no one-frame lag from the physics solver).
     const movingH = k.left.isDown || k.a.isDown || k.right.isDown || k.d.isDown;
     if (!onGround) {
-      if (s.anims.currentAnim?.key !== 'jump') s.anims.play('jump', true);
+      const jumpKey = this._animKey('jump');
+      if (s.anims.currentAnim?.key !== jumpKey) s.anims.play(jumpKey, true);
     } else if (movingH) {
-      s.anims.play('walk', true);
+      s.anims.play(this._animKey('walk'), true);
     } else {
-      s.anims.play('idle', true);
+      s.anims.play(this._animKey('idle'), true);
     }
     this._updateWeaponOverlay();
   }
@@ -2137,7 +2192,7 @@ class GameScene extends Phaser.Scene {
       // Tween-driven asymmetric swing arc set up by _beginSwingTween.
       pose = p._swing;
     } else {
-      const animKey = s.anims.currentAnim?.key || 'idle';
+      const animKey = this._animBase(s.anims.currentAnim?.key) || 'idle';
       // Phaser frame indices are 1-based within the animation.
       const frame   = (s.anims.currentFrame?.index || 1) - 1;
       // Hand sits at hip / waist height — around y=7 unscaled below
@@ -2195,7 +2250,7 @@ class GameScene extends Phaser.Scene {
     // Sheathed-on-back when ducking → render behind the player so only
     // the hilt and blade tip stick out of the silhouette.  Otherwise
     // the sword sits in the hand in front of the body.
-    const animNow  = s.anims.currentAnim?.key;
+    const animNow  = this._animBase(s.anims.currentAnim?.key);
     const sheathed = (animNow === 'duck' || animNow === 'block');
     w.setDepth(s.depth + (sheathed ? -1 : 1));
   }
@@ -2801,7 +2856,7 @@ class GameScene extends Phaser.Scene {
     if (p._swing) { this.tweens.killTweensOf(p._swing); p._swing = null; }
     ps.body.setVelocity(0, 0);
     ps.body.enable = false;
-    ps.anims.play('idle', true);
+    ps.anims.play(this._animKey('idle'), true);
 
     // Stop the portal's bob tween so it doesn't fight the shrink.
     this.tweens.killTweensOf(this.portal);
