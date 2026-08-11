@@ -14,11 +14,17 @@ const TS    = TILE * SCALE;   // 96px display per tile
 // Sword = 3); 1 unit = 32px, so a projectile travels range*32 px before
 // despawning.  Reload is in ms.  Speed is a display/travel-feel choice,
 // not part of the spec — projectiles cross their full range in ~0.5s.
+// `scale` is a multiplier on SCALE for the projectile sprite — each
+// element's art fills its 32x32 frame differently, so a single shared
+// value made fire and water read as much smaller than air.
+// `hugsGround` spawns the shot at the player's feet and lets it ride
+// over floors (see _wireProjectileObstacles) instead of flying at chest
+// height — that's what makes the water shot look like a wave.
 const ELEMENT_DEFS = {
-  fire:  { icon: 'icon_fire',  damage: 5, range: 10, reload: 3000, speed: 640, burn: { ticks: 3, dmgPerTick: 1, tickMs: 1000 } },
-  water: { icon: 'icon_water', damage: 2, range: 8,  reload: 2000, speed: 512, knockback: 260 },
-  air:   { icon: 'icon_air',   damage: 1, range: 5,  reload: 500,  speed: 320, knockback: 320 },
-  earth: { icon: 'icon_earth', damage: 8, range: 15, reload: 5000, speed: 960 },
+  fire:  { icon: 'icon_fire',  damage: 5, range: 10, reload: 3000, speed: 380, scale: 1.2, burst: [0xffd28a, 0xffa640, 0xff6a1f, 0xd83c10], burn: { ticks: 3, dmgPerTick: 1, tickMs: 1000 } },
+  water: { icon: 'icon_water', damage: 2, range: 8,  reload: 2000, speed: 420, scale: 1.2, burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd], hugsGround: true, knockback: 260 },
+  air:   { icon: 'icon_air',   damage: 1, range: 5,  reload: 500,  speed: 320, scale: 0.6, burst: [0xffffff, 0xe6f4ff, 0xc9e4f7, 0xa9cfe8], knockback: 320, fitBody: false },
+  earth: { icon: 'icon_earth', damage: 8, range: 15, reload: 5000, speed: 560, scale: 0.9, burst: [0xc9b083, 0x9c7f4e, 0x6f5a33, 0x4a3c22], hugsGround: true },
 };
 
 // ─────────────────────────────────────────────
@@ -87,13 +93,26 @@ function logIn(username, password) {
   setSessionUsername(acc.username);
 }
 
-function logOut() { setSessionUsername(null); }
+function logOut() {
+  setSessionUsername(null);
+  // Logging out drops you to guest — start that session clean.
+  for (const key of Object.keys(guestProgress)) delete guestProgress[key];
+}
+
+// Guests deliberately never touch localStorage, but their run still has
+// to hold together across scene restarts (level 1 → level 2, respawns).
+// This in-memory store lasts exactly as long as the page does, which is
+// the right lifetime for a guest session.
+const guestProgress = {};
 
 // Merge-save so we never downgrade fields (e.g. keeps level1Star=true if
 // the player replays without collecting the star).
 function saveProgress(update) {
   const name = getSessionUsername();
-  if (!name) return;                      // guests never persist
+  if (!name) {                            // guests: memory only
+    Object.assign(guestProgress, update);
+    return;
+  }
   const accounts = loadAccounts();
   const idx = accounts.findIndex(a => a.username === name);
   if (idx === -1) return;
@@ -543,7 +562,9 @@ class GameScene extends Phaser.Scene {
     // Hydrate XP/level from saved progress so progress sticks across
     // runs.  Defaults match a fresh save.
     const _user      = (typeof currentUser === 'function') ? currentUser() : null;
-    const _saved     = (_user && _user.progress) || {};
+    // Guests read back the in-memory store so XP/level survive scene
+    // restarts within the session (see saveProgress).
+    const _saved     = (_user && _user.progress) || guestProgress;
     this._level    = Number(_saved.level)     || 0;
     this._xp       = Number(_saved.xp)        || 0;
     this._xpToNext = Number(_saved.xpToNext)  || 15;
@@ -964,15 +985,6 @@ class GameScene extends Phaser.Scene {
       this.player.sprite, this.fireballs,
       (_p, fb) => this._onPlayerHitByFireball(fb), null, this
     );
-    // Fireballs burst into blue pixels when they strike solid terrain.
-    this.physics.add.collider(
-      this.fireballs, this.platforms,
-      (fb) => this._onFireballHitSolid(fb), null, this
-    );
-    this.physics.add.collider(
-      this.fireballs, this.spikes,
-      (fb) => this._onFireballHitSolid(fb), null, this
-    );
     // Player element shots damage ranged dummies
     this.rangedDummies.forEach(rd => {
       this.physics.add.overlap(
@@ -1021,6 +1033,59 @@ class GameScene extends Phaser.Scene {
       this.player.sprite, this._starSprite,
       () => this.collectStar(), null, this
     );
+
+    // Projectiles vs. the world.  Registered last because it needs the
+    // chests / moving platform / portal to already exist.
+    this._wireProjectileObstacles();
+  }
+
+  // Both projectile groups burst on the same set of solid things.  Uses
+  // overlap rather than collider so it works uniformly across static
+  // bodies (platforms/spikes), immovable sprites (chests, moving
+  // platform) and the portal image — no physics separation is wanted
+  // anyway, since the projectile is destroyed on contact.
+  //
+  // Ground-hugging shots (water) are the exception: they ride along the
+  // floor, so a platform *below* them is skipped while one whose top
+  // sits above them — a wall — still stops them.
+  _wireProjectileObstacles() {
+    const solids = [
+      this.platforms,
+      this.spikes,
+      this.chestL2A && this.chestL2A.sprite,
+      this.chestL2B && this.chestL2B.sprite,
+      this.movingPlatform,
+      this.portal,
+    ].filter(Boolean);
+
+    const ridesOver = (pr, solid) => {
+      const b = solid.body;
+      return !!(pr._hugsGround && b && b.top >= pr.body.bottom - 10);
+    };
+
+    // Phaser hands the callback (sprite, groupChild) when the second
+    // argument is a lone sprite but (groupChild, other) when it's a
+    // group, so the projectile isn't reliably the first parameter —
+    // resolve it by group membership instead of trusting the order.
+    // Getting this wrong destroys the chest instead of the fireball.
+    const shotFrom = (group, a, b) => (group.contains(a) ? a : b);
+
+    for (const solid of solids) {
+      this.physics.add.overlap(
+        this.fireballs, solid,
+        (a, b) => this._onFireballHitSolid(shotFrom(this.fireballs, a, b)),
+        null, this
+      );
+      this.physics.add.overlap(
+        this.elementProjectiles, solid,
+        (a, b) => this._onElementHitSolid(shotFrom(this.elementProjectiles, a, b)),
+        (a, b) => {
+          const pr = shotFrom(this.elementProjectiles, a, b);
+          return !ridesOver(pr, pr === a ? b : a);
+        },
+        this
+      );
+    }
   }
 
   _createRangedDummy(x, y) {
@@ -1542,8 +1607,9 @@ class GameScene extends Phaser.Scene {
       d.gfx.fillStyle(0x444444, 1);
       d.gfx.fillRect(BX + PS, BY, BW - PS, BH);
 
-      // Portrait — player idle sprite, centred in square
-      d.portrait.setTexture('player_idle', 0)
+      // Portrait — player idle sprite, centred in square.  Follows the
+      // selected skin so the female skin doesn't talk with the default face.
+      d.portrait.setTexture(this._skin === 'female' ? 'player_female' : 'player_idle', 0)
         .setScale(4).setFlipX(true)
         .setPosition(BX + PS / 2, BY + BH / 2)
         .setVisible(true);
@@ -1866,8 +1932,10 @@ class GameScene extends Phaser.Scene {
     }
 
     // ── Block input (T or '/' ) ──────────────────────────────────
+    // Gated on owning a shield, so the guard visual and the damage
+    // reduction in _onPlayerHitByFireball both stay off without one.
     const k = this.keys;
-    this._blocking = !!(k && (k.t.isDown || k.slash.isDown));
+    this._blocking = !!(k && (k.t.isDown || k.slash.isDown)) && this._isShielded();
     this._updateShieldOverlay();
   }
 
@@ -1938,8 +2006,19 @@ class GameScene extends Phaser.Scene {
 
   // Scatter a handful of little blue squares from (x, y) that fly
   // outward, shrink, and fade — the fireball "exploding into pixels".
+  // A player element shot striking terrain (or a chest / platform /
+  // portal) bursts in its own colours instead of passing through.
+  _onElementHitSolid(pr) {
+    if (!pr || !pr.active) return;
+    this._burstPixels(pr.x, pr.y, pr._burstColors || [0xffffff]);
+    pr.destroy();
+  }
+
   _explodeFireball(x, y) {
-    const colors = [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd];
+    this._burstPixels(x, y, [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd]);
+  }
+
+  _burstPixels(x, y, colors) {
     for (let i = 0; i < 11; i++) {
       const sz = (3 + Math.random() * 4) * (SCALE / 3);
       const px = this.add.rectangle(x, y, sz, sz, colors[i % colors.length])
@@ -1999,9 +2078,7 @@ class GameScene extends Phaser.Scene {
       this._shieldOverlay = this.add.image(0, 0, 'shield_overlay')
         .setScale(SCALE * 0.7).setDepth(this.player.sprite.depth + 1).setVisible(false);
     }
-    // Show the guard visual whenever blocking (base stance).  A real
-    // equipped shield would just make the block stronger, not gate the
-    // pose.
+    // _blocking is already gated on _isShielded(), so this follows it.
     const show = this._blocking;
     this._shieldOverlay.setVisible(show);
     if (!show) return;
@@ -2032,15 +2109,33 @@ class GameScene extends Phaser.Scene {
     const pr = this.elementProjectiles.create(startX, ps.y, def.icon, 0);
     if (!pr) return;
     pr.play(def.icon);
-    pr.setScale(SCALE * 0.6);
+    pr.setScale(SCALE * (def.scale || 0.6));
     pr.setFlipX(dir < 0);
     pr.body.setAllowGravity(false);
     pr.body.setVelocityX(dir * def.speed);
     pr._dir = dir;
     pr._damage = def.damage;
     pr._maxX = startX + dir * def.range * 32;
+    pr._burstColors = def.burst;
     if (def.knockback) pr._knockback = def.knockback;
     if (def.burn) pr._burn = def.burn;
+    // Crop the hitbox to the painted pixels.  Each element's art fills
+    // only part of its 32x32 frame, so the default full-frame body would
+    // burst the shot well before it visually touches anything now that
+    // projectiles collide with terrain.  Air opts out: its art is a tiny
+    // 8x8 puff and the roomy full-frame box is what makes it land.
+    if (def.fitBody !== false) this._fitBodyToTexture(pr, { frame: 0 });
+    // Ground-huggers ride the surface the player is standing on rather
+    // than flying at chest height.  Place, measure, then correct — that
+    // lands the *visible* bottom on the ground whatever the art's
+    // padding, scale or origin happen to be.
+    if (def.hugsGround) {
+      pr._hugsGround = true;
+      pr.y = ps.body.bottom;
+      pr.body.updateFromGameObject();
+      pr.y += ps.body.bottom - pr.body.bottom;
+      pr.body.updateFromGameObject();
+    }
   }
 
   // Fire keys '1'-'8' → hotbar slots 0-7. Edge-triggered so holding
@@ -2138,7 +2233,10 @@ class GameScene extends Phaser.Scene {
     // raise the shield over the lead hand/arm.  Movement still works,
     // but duck and jump are locked out so the player commits to the
     // stance.  Placed BEFORE the jump/duck branches so it preempts them.
-    if (this._levelNum === 2 && (k.t.isDown || k.slash.isDown) && onGround) {
+    // Requires an actually-equipped shield — without one there's nothing
+    // to guard with, so a player who skipped chest A can't block.
+    if (this._levelNum === 2 && (k.t.isDown || k.slash.isDown) && onGround
+        && this._isShielded()) {
       this._tryFireElement(k);
       this.applyHorizontalMove(p, k, 1);
       s.anims.play(this._animKey('block'), true);
