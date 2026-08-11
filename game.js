@@ -38,7 +38,7 @@ const ELEMENT_DEFS = {
 // then deals damage on the snap back to idle — so the wind-up is the
 // window to back off or hit it first.  Numbers are first-pass and meant
 // to be tuned once the EX level's difficulty is settled.
-const ZOMBIE = {
+const ZOMBIE_BASE = {
   hp: 10,
   speed: 70,           // slow shamble; player runs at 200
   damage: 5,
@@ -58,6 +58,25 @@ const ZOMBIE = {
   // distant zombie reads as alive rather than as scenery.
   idleTurnMinMs: 5000,
   idleTurnMaxMs: 8000,
+  // Texture, and the prefix its anims are registered under.
+  tex: 'zombie',
+  anim: 'zombie',
+};
+
+// Variants share the state machine; only these fields differ.
+const ZOMBIE_TYPES = {
+  normal: { ...ZOMBIE_BASE },
+  // Butler: identical stats, but quick on every axis — double the
+  // movement speed, half the wind-up telegraph, and half the gap
+  // between swings.  Much harder to back away from.
+  butler: {
+    ...ZOMBIE_BASE,
+    speed:      ZOMBIE_BASE.speed      * 2,
+    windupMs:   ZOMBIE_BASE.windupMs   / 2,
+    cooldownMs: ZOMBIE_BASE.cooldownMs / 2,
+    tex:  'zombie_butler',
+    anim: 'butler',
+  },
 };
 
 // ─────────────────────────────────────────────
@@ -320,6 +339,7 @@ class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('player_gold',   'assets/skins/Main Character - Gold Skin.png',   { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('dummy',         'assets/enemies/dummy.png',  { frameWidth: 27, frameHeight: 25 });
     this.load.spritesheet('zombie',        'assets/enemies/Zombie.png', { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('zombie_butler', 'assets/enemies/Butler Zombie.png', { frameWidth: 32, frameHeight: 32 });
     this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 14, frameHeight: 16 });
     this.load.image('item_wooden_sword',  'assets/items/Sword.png');
     this.load.image('item_wooden_shield', 'assets/items/Shield.png');
@@ -386,6 +406,7 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('player_gold',   0xffd700, 11, 18, 31);
     makeSheet('dummy',         0xcc4444, 2, 27, 25);
     makeSheet('zombie',        0x2f6b2f, 6, 32, 32);
+    makeSheet('zombie_butler', 0x1f4b2f, 5, 32, 32);
     makeSheet('chest',         0xcc9922, 2, 14, 16);
     makeImg  ('ground',        0x4a9944, 32, 32);
     makeImg  ('dirt',          0x3d2008, 32, 32);
@@ -757,6 +778,7 @@ class GameScene extends Phaser.Scene {
       this.zombies = [
         this._createZombie(1400, groundTop - 80),
         this._createZombie(2600, groundTop - 80),
+        this._createZombie(3600, groundTop - 80, 'butler'),
       ];
       this.zombies.forEach(z => {
         this.physics.add.collider(z.sprite, this.platforms);
@@ -1293,8 +1315,9 @@ class GameScene extends Phaser.Scene {
   //  frames were drawn.  Taking a hit forces 'knockback', which
   //  interrupts any of the above.
   // ─────────────────────────────────────────────────────────────────
-  _createZombie(x, y) {
-    const sprite = this.physics.add.sprite(x, y, 'zombie').setScale(SCALE);
+  _createZombie(x, y, type = 'normal') {
+    const cfg = ZOMBIE_TYPES[type] || ZOMBIE_TYPES.normal;
+    const sprite = this.physics.add.sprite(x, y, cfg.tex).setScale(SCALE);
     sprite.body.setAllowGravity(true);
     sprite.body.pushable = false;      // player can't shove it around
     // The idle frame's alpha box runs x=5..22, but columns 5-8 are just
@@ -1306,11 +1329,11 @@ class GameScene extends Phaser.Scene {
     const BODY_W = 13, BODY_H = 25;
     sprite.body.setSize(BODY_W, BODY_H)
                .setOffset((sprite.frame.width - BODY_W) / 2, 5);
-    sprite.anims.play('zombie_idle', true);
-    return { sprite, hp: ZOMBIE.hp, maxHp: ZOMBIE.hp, dead: false,
+    sprite.anims.play(cfg.anim + '_idle', true);
+    return { sprite, cfg, type, hp: cfg.hp, maxHp: cfg.hp, dead: false,
              state: 'idle', timer: 0, cooldown: 0,
              // staggered so a group of zombies doesn't turn in unison
-             turnTimer: Phaser.Math.Between(ZOMBIE.idleTurnMinMs, ZOMBIE.idleTurnMaxMs) };
+             turnTimer: Phaser.Math.Between(cfg.idleTurnMinMs, cfg.idleTurnMaxMs) };
   }
 
   _updateZombies(delta) {
@@ -1318,7 +1341,7 @@ class GameScene extends Phaser.Scene {
     const ps = this.player.sprite;
     for (const z of this.zombies) {
       if (z.dead || !z.sprite.active) continue;
-      const s = z.sprite;
+      const s = z.sprite, cfg = z.cfg, A = cfg.anim;
       if (z.timer    > 0) z.timer    -= delta;
       if (z.cooldown > 0) z.cooldown -= delta;
 
@@ -1327,7 +1350,7 @@ class GameScene extends Phaser.Scene {
         if (z.timer <= 0) {
           z.state = 'idle';
           s.body.setVelocityX(0);
-          s.anims.play('zombie_idle', true);
+          s.anims.play(A + '_idle', true);
         }
         continue;
       }
@@ -1340,13 +1363,13 @@ class GameScene extends Phaser.Scene {
         s.body.setVelocityX(0);
         if (z.timer <= 0) {
           // Snapping back to idle IS the strike.
-          s.anims.play('zombie_idle', true);
+          s.anims.play(A + '_idle', true);
           z.state    = 'recover';
-          z.timer    = ZOMBIE.recoverMs;
-          z.cooldown = ZOMBIE.cooldownMs;
-          const stillClose = Math.abs(ps.x - s.x) <= ZOMBIE.attackRange * 1.2
+          z.timer    = cfg.recoverMs;
+          z.cooldown = cfg.cooldownMs;
+          const stillClose = Math.abs(ps.x - s.x) <= cfg.attackRange * 1.2
                           && Math.abs(ps.y - s.y) < TS;
-          if (stillClose) this._damagePlayer(ZOMBIE.damage);
+          if (stillClose) this._damagePlayer(cfg.damage);
         }
         continue;
       }
@@ -1359,27 +1382,27 @@ class GameScene extends Phaser.Scene {
 
       // Out of aggro: hold position, unaware of the player, glancing
       // around every few seconds rather than staring at them.
-      if (dist > ZOMBIE.aggroRange) {
+      if (dist > cfg.aggroRange) {
         s.body.setVelocityX(0);
-        s.anims.play('zombie_idle', true);
+        s.anims.play(A + '_idle', true);
         z.turnTimer -= delta;
         if (z.turnTimer <= 0) {
           s.setFlipX(!s.flipX);
-          z.turnTimer = Phaser.Math.Between(ZOMBIE.idleTurnMinMs, ZOMBIE.idleTurnMaxMs);
+          z.turnTimer = Phaser.Math.Between(cfg.idleTurnMinMs, cfg.idleTurnMaxMs);
         }
         continue;
       }
 
       // In aggro — the zombie art faces left, so flipX turns it right.
       s.setFlipX(facing > 0);
-      if (dist <= ZOMBIE.attackRange && z.cooldown <= 0) {
+      if (dist <= cfg.attackRange && z.cooldown <= 0) {
         z.state = 'windup';
-        z.timer = ZOMBIE.windupMs;
+        z.timer = cfg.windupMs;
         s.body.setVelocityX(0);
-        s.anims.play('zombie_windup', true);
+        s.anims.play(A + '_windup', true);
       } else {
-        s.body.setVelocityX(facing * ZOMBIE.speed);
-        s.anims.play('zombie_walk', true);
+        s.body.setVelocityX(facing * cfg.speed);
+        s.anims.play(A + '_walk', true);
       }
     }
   }
@@ -1388,7 +1411,7 @@ class GameScene extends Phaser.Scene {
   // is already drawn red, so no hit-flash tint is layered on top.
   _hitZombie(z, dmg, fromX) {
     if (!z || z.dead) return;
-    const s = z.sprite;
+    const s = z.sprite, cfg = z.cfg;
     z.hp = Math.max(0, z.hp - dmg);
     if (z.hp <= 0) {
       z.dead = true;
@@ -1400,9 +1423,9 @@ class GameScene extends Phaser.Scene {
       return;
     }
     z.state = 'knockback';
-    z.timer = ZOMBIE.knockbackMs;
-    s.anims.play('zombie_knockback', true);
-    s.body.setVelocityX((Math.sign(s.x - fromX) || 1) * ZOMBIE.knockbackVx);
+    z.timer = cfg.knockbackMs;
+    s.anims.play(cfg.anim + '_knockback', true);
+    s.body.setVelocityX((Math.sign(s.x - fromX) || 1) * cfg.knockbackVx);
   }
 
   _createRangedDummy(x, y) {
@@ -1849,6 +1872,12 @@ class GameScene extends Phaser.Scene {
     add('zombie_walk',      'zombie', 1, 2, 6);
     add('zombie_windup',    'zombie', 4, 4, 4, 0);
     add('zombie_knockback', 'zombie', 5, 5, 4, 0);
+    // Butler sheet is the same layout without the duplicate walk frame,
+    // so its wind-up and knockback sit one index earlier.
+    add('butler_idle',      'zombie_butler', 0, 0, 4);
+    add('butler_walk',      'zombie_butler', 1, 2, 9);
+    add('butler_windup',    'zombie_butler', 3, 3, 4, 0);
+    add('butler_knockback', 'zombie_butler', 4, 4, 4, 0);
 
     add('dummy_idle',   'dummy',         0, 0,  4);
     add('dummy_hit',    'dummy',         1, 1,  4, 0);
