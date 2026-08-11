@@ -43,7 +43,10 @@ const ZOMBIE = {
   speed: 70,           // slow shamble; player runs at 200
   damage: 12,
   aggroRange: 460,     // starts following
-  attackRange: 84,     // close enough to swing
+  // Centre-to-centre.  Player half-width is 21 and the zombie's is now
+  // ~20, so they touch at ~41 — 68 lets it swing from just under half a
+  // tile away, roughly where its arm visually reaches.
+  attackRange: 68,
   windupMs: 420,       // arms raised — the telegraph
   recoverMs: 300,      // held idle after the strike
   cooldownMs: 650,     // gap before it can wind up again
@@ -1288,7 +1291,15 @@ class GameScene extends Phaser.Scene {
     const sprite = this.physics.add.sprite(x, y, 'zombie').setScale(SCALE);
     sprite.body.setAllowGravity(true);
     sprite.body.pushable = false;      // player can't shove it around
-    this._fitBodyToTexture(sprite, { frame: 0 });
+    // The idle frame's alpha box runs x=5..22, but columns 5-8 are just
+    // the outstretched arm (2-4px tall).  Fitting to that inflated the
+    // body by 12px of empty air, so the zombie collided and took hits
+    // through the gap in front of it.  Box the torso instead, and keep
+    // it centred — Phaser doesn't mirror body offsets on flipX, so an
+    // asymmetric box would sit on the wrong side when it faces right.
+    const BODY_W = 13, BODY_H = 25;
+    sprite.body.setSize(BODY_W, BODY_H)
+               .setOffset((sprite.frame.width - BODY_W) / 2, 5);
     sprite.anims.play('zombie_idle', true);
     return { sprite, hp: ZOMBIE.hp, maxHp: ZOMBIE.hp, dead: false,
              state: 'idle', timer: 0, cooldown: 0 };
