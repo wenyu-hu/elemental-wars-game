@@ -32,6 +32,31 @@ const ELEMENT_DEFS = {
 };
 
 // ─────────────────────────────────────────────
+//  Player skins
+// ─────────────────────────────────────────────
+// Every skin ships the same set of animations, distinguished by suffix
+// (`idle`, `idle_f`, `idle_gold`, ...) — see buildAnims and _animKey.
+// `unlockFlag` names a saved-progress boolean; a skin with one stays
+// locked in the picker until that flag is set.
+const SKINS = [
+  { key: 'default', label: 'Default', tex: 'player_idle',   suffix: ''      },
+  { key: 'female',  label: 'Female',  tex: 'player_female', suffix: '_f'    },
+  { key: 'gold',    label: 'Gold',    tex: 'player_gold',   suffix: '_gold',
+    unlockFlag: 'goldSkinUnlocked', lockedHint: 'Beat the EX level' },
+];
+const SKIN_BY_KEY        = Object.fromEntries(SKINS.map(s => [s.key, s]));
+const SKIN_ANIM_SUFFIX   = Object.fromEntries(SKINS.map(s => [s.key, s.suffix]));
+
+// A skin is usable if it exists and either needs no unlock or has been
+// earned.  Guards against a stale/hand-edited saved `skin` value leaving
+// the player on a skin whose animations they shouldn't have.
+function skinUnlocked(key, progress) {
+  const def = SKIN_BY_KEY[key];
+  if (!def) return false;
+  return !def.unlockFlag || !!(progress && progress[def.unlockFlag]);
+}
+
+// ─────────────────────────────────────────────
 //  Auth / progress persistence (localStorage)
 // ─────────────────────────────────────────────
 // localStorage is per-origin + per-browser profile, so "max accounts per
@@ -263,6 +288,7 @@ class PreloadScene extends Phaser.Scene {
     // combined sheet, cropped to the same 18x31 frame size as the
     // default skin so all hitbox math applies unchanged.
     this.load.spritesheet('player_female', 'assets/Main Character - Female Skin.png', { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('player_gold',   'assets/Main Character - Gold Skin.png',   { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('dummy',         'assets/dummy.png',  { frameWidth: 27, frameHeight: 25 });
     this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 14, frameHeight: 16 });
     this.load.image('item_wooden_sword',  'assets/Sword.png');
@@ -324,6 +350,7 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('player_weapon_attack', 0xffaa44, 3, 32, 32);
     makeSheet('player_duck',   0x2266cc, 1, 18, 31);
     makeSheet('player_female', 0xff69b4, 10, 18, 31);
+    makeSheet('player_gold',   0xffd700, 11, 18, 31);
     makeSheet('dummy',         0xcc4444, 2, 27, 25);
     makeSheet('chest',         0xcc9922, 2, 14, 16);
     makeImg  ('ground',        0x4a9944, 32, 32);
@@ -437,18 +464,15 @@ class MenuScene extends Phaser.Scene {
       this.input.keyboard.once('keydown-SPACE', startGame);
 
       // ── Skin picker panel (hidden until "SKINS" is clicked) ──────
-      // Unlocked for any account that has logged in. Shows both skins
-      // side by side with a live preview frame; the selected one gets a
-      // gold border. Clicking a card selects it immediately.
-      let skinChoice = progress.skin === 'female' ? 'female' : 'default';
+      // Shows every skin side by side with a live preview frame; the
+      // selected one gets a gold border.  Locked skins (the gold EX
+      // reward) render greyed out with a hint and can't be selected —
+      // visible rather than hidden so there's something to play for.
+      let skinChoice = skinUnlocked(progress.skin, progress) ? progress.skin : 'default';
       const panelObjects = [];
       const cardW = 160, cardH = 200, gap = 30;
       const cards = {};
-      const skinDefs = [
-        { key: 'default', label: 'Default', tex: 'player_idle' },
-        { key: 'female',  label: 'Female',  tex: 'player_female' },
-      ];
-      const rowW = cardW * skinDefs.length + gap * (skinDefs.length - 1);
+      const rowW = cardW * SKINS.length + gap * (SKINS.length - 1);
       const startX = width/2 - rowW/2 + cardW/2;
 
       panelObjects.push(this.add.text(width/2, height/2 - 110, 'Choose your skin', {
@@ -457,23 +481,39 @@ class MenuScene extends Phaser.Scene {
       }).setOrigin(0.5));
 
       const selectSkin = (skinKey) => {
+        if (!skinUnlocked(skinKey, progress)) return;
         skinChoice = skinKey;
         saveProgress({ skin: skinKey });
-        skinDefs.forEach(def => {
+        SKINS.forEach(def => {
+          if (!skinUnlocked(def.key, progress)) return;
           cards[def.key].border.setStrokeStyle(4, def.key === skinKey ? 0xffd700 : 0xcccccc);
         });
       };
 
-      skinDefs.forEach((def, i) => {
+      SKINS.forEach((def, i) => {
         const cx = startX + i * (cardW + gap);
         const cy = height/2 + 5;
-        const border = this.add.rectangle(cx, cy, cardW, cardH, 0xffffff)
-          .setStrokeStyle(4, def.key === skinChoice ? 0xffd700 : 0xcccccc)
-          .setInteractive({ useHandCursor: true });
+        const unlocked = skinUnlocked(def.key, progress);
+        const border = this.add.rectangle(cx, cy, cardW, cardH, unlocked ? 0xffffff : 0xdddddd)
+          .setStrokeStyle(4, !unlocked ? 0xaaaaaa
+                             : def.key === skinChoice ? 0xffd700 : 0xcccccc);
         const preview = this.add.image(cx, cy, def.tex, 0).setScale(4);
-        border.on('pointerup', () => selectSkin(def.key));
-        cards[def.key] = { border, preview };
         panelObjects.push(border, preview);
+        if (unlocked) {
+          border.setInteractive({ useHandCursor: true });
+          border.on('pointerup', () => selectSkin(def.key));
+        } else {
+          // Silhouette the preview and label what unlocks it.
+          preview.setTintFill(0x777777);
+          const hint = this.add.text(cx, cy + cardH/2 - 26, def.lockedHint || 'Locked', {
+            fontSize: '13px', fontFamily: '"Arial Black", Arial, sans-serif',
+            color: '#ffffff', backgroundColor: '#00000088',
+            padding: { x: 6, y: 4 }, align: 'center',
+            wordWrap: { width: cardW - 20 },
+          }).setOrigin(0.5);
+          panelObjects.push(hint);
+        }
+        cards[def.key] = { border, preview };
       });
 
       const backBtn = makeBtn(height/2 + 145, 'BACK', '#8c8c8c', '#6c6c6c', () => hideSkinPicker());
@@ -594,7 +634,7 @@ class GameScene extends Phaser.Scene {
 
     // Selected player skin — 'default' or 'female' (unlocked for any
     // account that has logged in, chosen from the main menu).
-    this._skin = _saved.skin === 'female' ? 'female' : 'default';
+    this._skin = skinUnlocked(_saved.skin, _saved) ? _saved.skin : 'default';
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
     this.cameras.main.setBackgroundColor(0xeef8ff);
@@ -1509,6 +1549,25 @@ class GameScene extends Phaser.Scene {
     // Static block stance — reuses the unique bare-fist attack frame.
     add('block_f', 'player_female', 4, 4, 4, 0);
 
+    // ── Gold skin (EX-level reward) — 11 frames, 0-indexed:
+    // 0 idle, 1-2 weapon attack, 3-5 bare-fist attack, 6-7 jump,
+    // 8-9 walk, 10 duck.  Unlike the female sheet the bare-fist attack
+    // has its own three frames rather than borrowing the weapon ones.
+    add('idle_gold', 'player_gold',  0,  0, 4);
+    add('duck_gold', 'player_gold', 10, 10, 4);
+    add('walk_gold', 'player_gold',  8,  9, 8);
+    add('jump_gold', 'player_gold',  6,  7, 6, 0);
+    add('attack_gold', 'player_gold', 3, 5, 12, 0);
+    if (!this.anims.exists('weapon_attack_gold')) {
+      this.anims.create({
+        key: 'weapon_attack_gold', frameRate: 15, repeat: 0,
+        frames: [1, 2, 1].map(f => ({ key: 'player_gold', frame: f })),
+      });
+    }
+    // Block holds the furthest-extended bare-fist frame (5), matching how
+    // the other two skins freeze on their most-extended punch.
+    add('block_gold', 'player_gold', 5, 5, 4, 0);
+
     add('dummy_idle',   'dummy',         0, 0,  4);
     add('dummy_hit',    'dummy',         1, 1,  4, 0);
     add('chest_closed', 'chest',         0, 0,  4);
@@ -1612,8 +1671,8 @@ class GameScene extends Phaser.Scene {
       d.gfx.fillRect(BX + PS, BY, BW - PS, BH);
 
       // Portrait — player idle sprite, centred in square.  Follows the
-      // selected skin so the female skin doesn't talk with the default face.
-      d.portrait.setTexture(this._skin === 'female' ? 'player_female' : 'player_idle', 0)
+      // selected skin so a skinned player doesn't talk with the default face.
+      d.portrait.setTexture((SKIN_BY_KEY[this._skin] || SKIN_BY_KEY.default).tex, 0)
         .setScale(4).setFlipX(true)
         .setPosition(BX + PS / 2, BY + BH / 2)
         .setVisible(true);
@@ -2184,7 +2243,8 @@ class GameScene extends Phaser.Scene {
   // semantic name for lookups (POSE table, sheathed-check) that only key
   // off the base name.
   _animKey(base) {
-    return this._skin === 'female' ? base + '_f' : base;
+    const suffix = SKIN_ANIM_SUFFIX[this._skin] || '';
+    return base + suffix;
   }
   _animBase(key) {
     return (key && key.endsWith('_f')) ? key.slice(0, -2) : key;
