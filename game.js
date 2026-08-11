@@ -296,8 +296,9 @@ class PreloadScene extends Phaser.Scene {
     this.load.image('ground',   'assets/blocks/ground.png');
     this.load.image('dirt',     'assets/blocks/dirt.png');
     this.load.image('platform', 'assets/platform.png');
-    this.load.image('tile_block', 'assets/blocks/Tile Block.png');
-    this.load.image('carpet_block', 'assets/blocks/Luxury Carpet Block.png');
+    // EX floor: fringed surface row over plain carpet fill beneath.
+    this.load.image('carpet_top',  'assets/blocks/Luxury Carpet Block.png');
+    this.load.image('carpet_fill', 'assets/blocks/Carpet Block.png');
     this.load.image('spike',    'assets/spike.png');
     this.load.image('portal',   'assets/portal.png');
     this.load.image('star',     'assets/star.png');
@@ -358,8 +359,8 @@ class PreloadScene extends Phaser.Scene {
     makeImg  ('ground',        0x4a9944, 32, 32);
     makeImg  ('dirt',          0x3d2008, 32, 32);
     makeImg  ('platform',      0x8b5e3c, 32,  6);
-    makeImg  ('tile_block',    0x555555, 32, 32);
-    makeImg  ('carpet_block',  0x7a1d3f, 32, 32);
+    makeImg  ('carpet_top',    0x7a1d3f, 32, 32);
+    makeImg  ('carpet_fill',   0x7a1d3f, 32, 32);
     makeImg  ('spike',         0xddddcc,  8,  8);  // 8×8 fallback
     makeImg  ('dust',          0xd4c4a8,  4,  4);
     makeImg  ('portal',        0x00ddff, 32, 32);   // portal fallback
@@ -1003,9 +1004,9 @@ class GameScene extends Phaser.Scene {
     const rows = Math.ceil((worldH - (floorY - TS / 2)) / TS);
 
     for (let r = 0; r < rows; r++) {
-      // Carpet runs along the surface the player actually walks on;
-      // plain brick fills the mass underneath it.
-      const tex = (r === 0) ? 'carpet_block' : 'tile_block';
+      // Only the surface row carries the gold fringe; the rest is plain
+      // carpet in the same crimson, so the floor reads as one slab.
+      const tex = (r === 0) ? 'carpet_top' : 'carpet_fill';
       for (let c = 0; c < cols; c++) {
         this.platforms.create(c * TS, floorY + r * TS, tex)
           .setScale(SCALE).refreshBody();
