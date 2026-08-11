@@ -6,11 +6,6 @@
 const SCALE = 3;
 const TILE  = 32;
 const TS    = TILE * SCALE;   // 96px display per tile
-// Source size of the EX level's brick tile.  It's 9x9 (trimmed from a
-// mostly-empty 32x32 export), so filling a 96px cell scales it x10.67 —
-// non-integer, which makes some source pixels render 1px wider than
-// others.  Re-exporting the art at 32x32 would make this a clean x3.
-const TILE_BLOCK_SRC = 9;
 
 // ─────────────────────────────────────────────
 //  Basic elements — hotbar abilities unlocked on level-up
@@ -301,8 +296,6 @@ class PreloadScene extends Phaser.Scene {
     this.load.image('ground',   'assets/blocks/ground.png');
     this.load.image('dirt',     'assets/blocks/dirt.png');
     this.load.image('platform', 'assets/platform.png');
-    // EX-level floor brick.  Trimmed to its 9x9 art so it repeats without
-    // gaps — the source frame was 32x32 with the pattern in the middle.
     this.load.image('tile_block', 'assets/blocks/Tile Block.png');
     this.load.image('spike',    'assets/spike.png');
     this.load.image('portal',   'assets/portal.png');
@@ -364,7 +357,7 @@ class PreloadScene extends Phaser.Scene {
     makeImg  ('ground',        0x4a9944, 32, 32);
     makeImg  ('dirt',          0x3d2008, 32, 32);
     makeImg  ('platform',      0x8b5e3c, 32,  6);
-    makeImg  ('tile_block',    0x555555,  9,  9);
+    makeImg  ('tile_block',    0x555555, 32, 32);
     makeImg  ('spike',         0xddddcc,  8,  8);  // 8×8 fallback
     makeImg  ('dust',          0xd4c4a8,  4,  4);
     makeImg  ('portal',        0x00ddff, 32, 32);   // portal fallback
@@ -930,19 +923,15 @@ class GameScene extends Phaser.Scene {
   //  dirt/grass block gets, so the floor reads at the same scale as
   //  levels 1 and 2 and every other system — spawn height, camera
   //  bounds, duck/stand headroom — works off the same numbers.
-  //
-  //  The art is 9x9, so filling a 96px cell needs a x10.67 scale.  See
-  //  TILE_BLOCK_SRC: a 32x32 re-export would make this a clean x3.
   // ─────────────────────────────────────────────────────────────────
   _buildLevelEX(worldW, worldH, floorY) {
-    const scale = TS / TILE_BLOCK_SRC;
-    const cols  = Math.ceil(worldW / TS) + 1;
-    const rows  = Math.ceil((worldH - (floorY - TS / 2)) / TS);
+    const cols = Math.ceil(worldW / TS) + 1;
+    const rows = Math.ceil((worldH - (floorY - TS / 2)) / TS);
 
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         this.platforms.create(c * TS, floorY + r * TS, 'tile_block')
-          .setScale(scale).refreshBody();
+          .setScale(SCALE).refreshBody();
       }
     }
   }
