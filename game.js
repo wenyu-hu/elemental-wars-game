@@ -32,6 +32,26 @@ const ELEMENT_DEFS = {
 };
 
 // ─────────────────────────────────────────────
+//  Zombie (EX level)
+// ─────────────────────────────────────────────
+// Shambles toward the player, telegraphs with a raised-arms wind-up,
+// then deals damage on the snap back to idle — so the wind-up is the
+// window to back off or hit it first.  Numbers are first-pass and meant
+// to be tuned once the EX level's difficulty is settled.
+const ZOMBIE = {
+  hp: 6,
+  speed: 70,           // slow shamble; player runs at 200
+  damage: 12,
+  aggroRange: 460,     // starts following
+  attackRange: 84,     // close enough to swing
+  windupMs: 420,       // arms raised — the telegraph
+  recoverMs: 300,      // held idle after the strike
+  cooldownMs: 650,     // gap before it can wind up again
+  knockbackMs: 300,
+  knockbackVx: 200,
+};
+
+// ─────────────────────────────────────────────
 //  Player skins
 // ─────────────────────────────────────────────
 // Every skin ships the same set of animations, distinguished by suffix
@@ -289,7 +309,8 @@ class PreloadScene extends Phaser.Scene {
     // default skin so all hitbox math applies unchanged.
     this.load.spritesheet('player_female', 'assets/skins/Main Character - Female Skin.png', { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('player_gold',   'assets/skins/Main Character - Gold Skin.png',   { frameWidth: 18, frameHeight: 31 });
-    this.load.spritesheet('dummy',         'assets/dummy.png',  { frameWidth: 27, frameHeight: 25 });
+    this.load.spritesheet('dummy',         'assets/enemies/dummy.png',  { frameWidth: 27, frameHeight: 25 });
+    this.load.spritesheet('zombie',        'assets/enemies/Zombie.png', { frameWidth: 32, frameHeight: 32 });
     this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 14, frameHeight: 16 });
     this.load.image('item_wooden_sword',  'assets/items/Sword.png');
     this.load.image('item_wooden_shield', 'assets/items/Shield.png');
@@ -303,7 +324,7 @@ class PreloadScene extends Phaser.Scene {
     this.load.image('portal',   'assets/portal.png');
     this.load.image('star',     'assets/star.png');
     // Level 2 — ranged dummy + element projectiles + moving platform
-    this.load.image('ranged_dummy',    'assets/Ranged_Dummy.png');
+    this.load.image('ranged_dummy',    'assets/enemies/Ranged_Dummy.png');
     this.load.image('moving_platform', 'assets/Moving Platform.png');
     this.load.image('shield_overlay',  'assets/items/Shield.png');
     this.load.spritesheet('blue_fireball', 'assets/Blue_Fireball.png', { frameWidth: 32, frameHeight: 32 });
@@ -355,6 +376,7 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('player_female', 0xff69b4, 10, 18, 31);
     makeSheet('player_gold',   0xffd700, 11, 18, 31);
     makeSheet('dummy',         0xcc4444, 2, 27, 25);
+    makeSheet('zombie',        0x2f6b2f, 6, 32, 32);
     makeSheet('chest',         0xcc9922, 2, 14, 16);
     makeImg  ('ground',        0x4a9944, 32, 32);
     makeImg  ('dirt',          0x3d2008, 32, 32);
@@ -587,6 +609,7 @@ class GameScene extends Phaser.Scene {
     this._shieldOverlay = null;    // block-stance shield (lazy-built)
     this._level2Complete = false;
     this._hotbar = null;           // 10-slot element hotbar (rebuilt in create())
+    this.zombies = null;           // EX-level zombies
   }
 
   create() {
@@ -720,6 +743,16 @@ class GameScene extends Phaser.Scene {
       );
     } else if (this._levelNum === 2) {
       this._buildLevel2Entities(floorY, groundTop);
+    } else if (this._levelNum === 'ex') {
+      // Two test zombies while the level's real layout is designed.
+      this.zombies = [
+        this._createZombie(1400, groundTop - 80),
+        this._createZombie(2600, groundTop - 80),
+      ];
+      this.zombies.forEach(z => {
+        this.physics.add.collider(z.sprite, this.platforms);
+        this.physics.add.collider(this.player.sprite, z.sprite);
+      });
     }
 
     // ── Camera ───────────────────────────────────────────────────────
@@ -1242,6 +1275,107 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────
+  //  Zombie
+  //
+  //  States: idle -> walk (player in aggro range) -> windup (in attack
+  //  range) -> recover.  Damage lands on the windup->recover transition,
+  //  i.e. the instant it snaps back to the idle pose, matching how the
+  //  frames were drawn.  Taking a hit forces 'knockback', which
+  //  interrupts any of the above.
+  // ─────────────────────────────────────────────────────────────────
+  _createZombie(x, y) {
+    const sprite = this.physics.add.sprite(x, y, 'zombie').setScale(SCALE);
+    sprite.body.setAllowGravity(true);
+    sprite.body.pushable = false;      // player can't shove it around
+    this._fitBodyToTexture(sprite, { frame: 0 });
+    sprite.anims.play('zombie_idle', true);
+    return { sprite, hp: ZOMBIE.hp, maxHp: ZOMBIE.hp, dead: false,
+             state: 'idle', timer: 0, cooldown: 0 };
+  }
+
+  _updateZombies(delta) {
+    if (!this.zombies || !this.player) return;
+    const ps = this.player.sprite;
+    for (const z of this.zombies) {
+      if (z.dead || !z.sprite.active) continue;
+      const s = z.sprite;
+      if (z.timer    > 0) z.timer    -= delta;
+      if (z.cooldown > 0) z.cooldown -= delta;
+
+      // Knockback overrides everything until it expires.
+      if (z.state === 'knockback') {
+        if (z.timer <= 0) {
+          z.state = 'idle';
+          s.body.setVelocityX(0);
+          s.anims.play('zombie_idle', true);
+        }
+        continue;
+      }
+
+      const dx     = ps.x - s.x;
+      const dist   = Math.abs(dx);
+      const facing = Math.sign(dx) || 1;
+
+      if (z.state === 'windup') {
+        s.body.setVelocityX(0);
+        if (z.timer <= 0) {
+          // Snapping back to idle IS the strike.
+          s.anims.play('zombie_idle', true);
+          z.state    = 'recover';
+          z.timer    = ZOMBIE.recoverMs;
+          z.cooldown = ZOMBIE.cooldownMs;
+          const stillClose = Math.abs(ps.x - s.x) <= ZOMBIE.attackRange * 1.2
+                          && Math.abs(ps.y - s.y) < TS;
+          if (stillClose) this._damagePlayer(ZOMBIE.damage);
+        }
+        continue;
+      }
+
+      if (z.state === 'recover') {
+        s.body.setVelocityX(0);
+        if (z.timer <= 0) z.state = 'idle';
+        continue;
+      }
+
+      // idle / walking — the zombie art faces left, so flipX turns it right.
+      s.setFlipX(facing > 0);
+      if (dist <= ZOMBIE.attackRange && z.cooldown <= 0) {
+        z.state = 'windup';
+        z.timer = ZOMBIE.windupMs;
+        s.body.setVelocityX(0);
+        s.anims.play('zombie_windup', true);
+      } else if (dist <= ZOMBIE.aggroRange && dist > ZOMBIE.attackRange) {
+        s.body.setVelocityX(facing * ZOMBIE.speed);
+        s.anims.play('zombie_walk', true);
+      } else {
+        s.body.setVelocityX(0);
+        s.anims.play('zombie_idle', true);
+      }
+    }
+  }
+
+  // Damage a zombie and knock it away from `fromX`.  The knockback frame
+  // is already drawn red, so no hit-flash tint is layered on top.
+  _hitZombie(z, dmg, fromX) {
+    if (!z || z.dead) return;
+    const s = z.sprite;
+    z.hp = Math.max(0, z.hp - dmg);
+    if (z.hp <= 0) {
+      z.dead = true;
+      s.body.setVelocityX(0);
+      this.tweens.add({
+        targets: s, angle: 90, alpha: 0, duration: 360, ease: 'Power2',
+        onComplete: () => s.destroy(),
+      });
+      return;
+    }
+    z.state = 'knockback';
+    z.timer = ZOMBIE.knockbackMs;
+    s.anims.play('zombie_knockback', true);
+    s.body.setVelocityX((Math.sign(s.x - fromX) || 1) * ZOMBIE.knockbackVx);
+  }
+
   _createRangedDummy(x, y) {
     const sprite = this.physics.add.sprite(x, y, 'ranged_dummy').setScale(SCALE);
     sprite.body.setAllowGravity(true);
@@ -1678,6 +1812,15 @@ class GameScene extends Phaser.Scene {
     // the other two skins freeze on their most-extended punch.
     add('block_gold', 'player_gold', 5, 5, 4, 0);
 
+    // ── Zombie (EX level) ────────────────────────────────────────
+    // 0 idle, 1-2 walk, 3 duplicate of walk 2 (skipped), 4 attack
+    // wind-up, 5 knockback.  The wind-up is a pose, not the strike —
+    // damage lands when the zombie snaps back to idle after it.
+    add('zombie_idle',      'zombie', 0, 0, 4);
+    add('zombie_walk',      'zombie', 1, 2, 6);
+    add('zombie_windup',    'zombie', 4, 4, 4, 0);
+    add('zombie_knockback', 'zombie', 5, 5, 4, 0);
+
     add('dummy_idle',   'dummy',         0, 0,  4);
     add('dummy_hit',    'dummy',         1, 1,  4, 0);
     add('chest_closed', 'chest',         0, 0,  4);
@@ -2040,6 +2183,7 @@ class GameScene extends Phaser.Scene {
     this._checkDummyProximity();
     this._checkPatrolDummyProximity();
     this._updateLevel2(delta);
+    this._updateZombies(delta);
   }
 
   // Per-frame tick for level-2-specific systems: ranged dummies firing,
@@ -2156,8 +2300,17 @@ class GameScene extends Phaser.Scene {
       this.time.delayedCall(80, () => this.player.sprite.clearTint());
       return;
     }
+    this._damagePlayer(dmg);
+  }
+
+  // Take `dmg` off the player with the standard hit reaction: red flash,
+  // screen shake, and a blink of invincibility (_spikeHit) so a single
+  // source can't chain-hit.  Shared by fireballs and zombie strikes.
+  // Returns false when i-frames swallowed the hit.
+  _damagePlayer(dmg) {
+    if (this._spikeHit || dmg <= 0) return false;
     this._hp = Math.max(0, this._hp - dmg);
-    if (this._hp <= 0) { this.respawnPlayer(); return; }
+    if (this._hp <= 0) { this.respawnPlayer(); return true; }
     this._spikeHit = true;
     const ps = this.player.sprite;
     ps.setTintFill(0xff4444);
@@ -2168,6 +2321,7 @@ class GameScene extends Phaser.Scene {
       duration: 70, yoyo: true, repeat: 5,
       onComplete: () => { ps.setAlpha(1); this._spikeHit = false; }
     });
+    return true;
   }
 
   // Fireball hit solid terrain — burst into blue pixels and vanish.
@@ -2606,6 +2760,16 @@ class GameScene extends Phaser.Scene {
 
   checkAttackHit() {
     const ps = this.player.sprite, reach = TS * 1.3;
+    if (this.zombies) {
+      for (const z of this.zombies) {
+        if (z.dead || !z.sprite.active) continue;
+        const zs = z.sprite;
+        const facing = ps.flipX ? zs.x > ps.x : zs.x < ps.x;
+        if (Math.abs(ps.x - zs.x) < reach && Math.abs(ps.y - zs.y) < TS && facing) {
+          this._hitZombie(z, this._meleeDamage(), ps.x);
+        }
+      }
+    }
     if (this.dummy && !this.dummy.dead) {
       const ds = this.dummy.sprite;
       const facing = ps.flipX ? ds.x > ps.x : ds.x < ps.x;
