@@ -6,6 +6,11 @@
 const SCALE = 3;
 const TILE  = 32;
 const TS    = TILE * SCALE;   // 96px display per tile
+// Source size of the EX level's brick tile.  It's 9x9 (trimmed from a
+// mostly-empty 32x32 export), so filling a 96px cell scales it x10.67 —
+// non-integer, which makes some source pixels render 1px wider than
+// others.  Re-exporting the art at 32x32 would make this a clean x3.
+const TILE_BLOCK_SRC = 9;
 
 // ─────────────────────────────────────────────
 //  Basic elements — hotbar abilities unlocked on level-up
@@ -278,33 +283,36 @@ class PreloadScene extends Phaser.Scene {
   constructor() { super('PreloadScene'); }
 
   preload() {
-    this.load.spritesheet('player_idle',   'assets/idle.png',   { frameWidth: 18, frameHeight: 31 });
-    this.load.spritesheet('player_walk',   'assets/walk.png',   { frameWidth: 18, frameHeight: 31 });
-    this.load.spritesheet('player_jump',   'assets/jump.png',   { frameWidth: 18, frameHeight: 31 });
-    this.load.spritesheet('player_attack',        'assets/attack.png',        { frameWidth: 18, frameHeight: 31 });
-    this.load.spritesheet('player_weapon_attack', 'assets/weapon_attack.png', { frameWidth: 32, frameHeight: 32 });
-    this.load.spritesheet('player_duck',   'assets/duck.png',   { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('player_idle',   'assets/skins/idle.png',   { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('player_walk',   'assets/skins/walk.png',   { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('player_jump',   'assets/skins/jump.png',   { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('player_attack',        'assets/skins/attack.png',        { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('player_weapon_attack', 'assets/skins/weapon_attack.png', { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('player_duck',   'assets/skins/duck.png',   { frameWidth: 18, frameHeight: 31 });
     // Female skin — unlocked for any account that has logged in. Single
     // combined sheet, cropped to the same 18x31 frame size as the
     // default skin so all hitbox math applies unchanged.
-    this.load.spritesheet('player_female', 'assets/Main Character - Female Skin.png', { frameWidth: 18, frameHeight: 31 });
-    this.load.spritesheet('player_gold',   'assets/Main Character - Gold Skin.png',   { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('player_female', 'assets/skins/Main Character - Female Skin.png', { frameWidth: 18, frameHeight: 31 });
+    this.load.spritesheet('player_gold',   'assets/skins/Main Character - Gold Skin.png',   { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('dummy',         'assets/dummy.png',  { frameWidth: 27, frameHeight: 25 });
     this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 14, frameHeight: 16 });
-    this.load.image('item_wooden_sword',  'assets/Sword.png');
-    this.load.image('item_wooden_shield', 'assets/Shield.png');
-    this.load.image('ground',   'assets/ground.png');
-    this.load.image('dirt',     'assets/dirt.png');
+    this.load.image('item_wooden_sword',  'assets/items/Sword.png');
+    this.load.image('item_wooden_shield', 'assets/items/Shield.png');
+    this.load.image('ground',   'assets/blocks/ground.png');
+    this.load.image('dirt',     'assets/blocks/dirt.png');
     this.load.image('platform', 'assets/platform.png');
+    // EX-level floor brick.  Trimmed to its 9x9 art so it repeats without
+    // gaps — the source frame was 32x32 with the pattern in the middle.
+    this.load.image('tile_block', 'assets/blocks/Tile Block.png');
     this.load.image('spike',    'assets/spike.png');
     this.load.image('portal',   'assets/portal.png');
     this.load.image('star',     'assets/star.png');
     // Level 2 — ranged dummy + element projectiles + moving platform
     this.load.image('ranged_dummy',    'assets/Ranged_Dummy.png');
     this.load.image('moving_platform', 'assets/Moving Platform.png');
-    this.load.image('shield_overlay',  'assets/Shield.png');
+    this.load.image('shield_overlay',  'assets/items/Shield.png');
     this.load.spritesheet('blue_fireball', 'assets/Blue_Fireball.png', { frameWidth: 32, frameHeight: 32 });
-    this.load.spritesheet('bow',           'assets/Bow.png',           { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('bow',           'assets/items/Bow.png',           { frameWidth: 32, frameHeight: 32 });
     // Element icons — looping idle spritesheets, 32x32 frames. Reused for
     // both the hotbar/choice-screen icon and the fired projectile itself.
     this.load.spritesheet('icon_fire',  'assets/elements/Fire.png',  { frameWidth: 32, frameHeight: 32 });
@@ -356,6 +364,7 @@ class PreloadScene extends Phaser.Scene {
     makeImg  ('ground',        0x4a9944, 32, 32);
     makeImg  ('dirt',          0x3d2008, 32, 32);
     makeImg  ('platform',      0x8b5e3c, 32,  6);
+    makeImg  ('tile_block',    0x555555,  9,  9);
     makeImg  ('spike',         0xddddcc,  8,  8);  // 8×8 fallback
     makeImg  ('dust',          0xd4c4a8,  4,  4);
     makeImg  ('portal',        0x00ddff, 32, 32);   // portal fallback
@@ -562,7 +571,11 @@ class GameScene extends Phaser.Scene {
   // level-1 run, and the `if (this.entity)` guards in create() pass
   // truthily on dangling sprites.
   init(data) {
-    this._levelNum = (data && Number(data.level)) || 1;
+    // Level ids are numeric for the main path.  'ex' is the standalone
+    // anniversary level, deliberately kept out of the number sequence so
+    // adding a real level 3 later can't collide with it.
+    const rawLevel = data && data.level;
+    this._levelNum = (rawLevel === 'ex') ? 'ex' : (Number(rawLevel) || 1);
     this.dummy        = null;
     this.chest        = null;
     this.patrolDummy  = null;
@@ -583,7 +596,9 @@ class GameScene extends Phaser.Scene {
   create() {
     // World width is per-level; height is shared so the camera and
     // floor math stays consistent across tutorials.
-    const WORLD_W   = (this._levelNum === 2) ? 6336 : 5800;
+    const WORLD_W   = (this._levelNum === 2)    ? 6336
+                    : (this._levelNum === 'ex') ? 4800
+                    : 5800;
     const WORLD_H   = 1200;
     const floorY    = WORLD_H - 4 * TS;       // grass tile centre  y = 816
     const groundTop = floorY - TS / 2;         // grass surface      y = 768
@@ -643,7 +658,9 @@ class GameScene extends Phaser.Scene {
     // Level terrain + spike pits
     this.platforms = this.physics.add.staticGroup();
     this.spikes    = this.physics.add.staticGroup();
-    if (this._levelNum === 2) {
+    if (this._levelNum === 'ex') {
+      this._buildLevelEX(WORLD_W, WORLD_H, floorY);
+    } else if (this._levelNum === 2) {
       this._buildLevel2(WORLD_W, WORLD_H, floorY);
     } else {
       this.buildLevel(WORLD_W, WORLD_H, floorY);
@@ -904,6 +921,32 @@ class GameScene extends Phaser.Scene {
   //    50–52  small spike pit at floor, crossed via the Moving Platform
   //    53–65  floor-level ground: Chest #2 (checkpoint) + portal at end
   // ─────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  //  EX level (2nd-anniversary bonus level, reward = gold skin)
+  //
+  //  Terrain only for now: one flat brick floor spanning the world.
+  //
+  //  Each Tile Block occupies a full 96px cell, the same footprint a
+  //  dirt/grass block gets, so the floor reads at the same scale as
+  //  levels 1 and 2 and every other system — spawn height, camera
+  //  bounds, duck/stand headroom — works off the same numbers.
+  //
+  //  The art is 9x9, so filling a 96px cell needs a x10.67 scale.  See
+  //  TILE_BLOCK_SRC: a 32x32 re-export would make this a clean x3.
+  // ─────────────────────────────────────────────────────────────────
+  _buildLevelEX(worldW, worldH, floorY) {
+    const scale = TS / TILE_BLOCK_SRC;
+    const cols  = Math.ceil(worldW / TS) + 1;
+    const rows  = Math.ceil((worldH - (floorY - TS / 2)) / TS);
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        this.platforms.create(c * TS, floorY + r * TS, 'tile_block')
+          .setScale(scale).refreshBody();
+      }
+    }
+  }
+
   _buildLevel2(worldW, worldH, floorY) {
     const grass = (startX, cols, y) => {
       for (let i = 0; i < cols; i++) {
@@ -3296,6 +3339,8 @@ class MapScene extends Phaser.Scene {
     if (lvl1Done) {
       this.input.keyboard.once('keydown-TWO', () => this.scene.start('GameScene', { level: 2 }));
     }
+    // Temporary way into the EX level while its map node doesn't exist yet.
+    this.input.keyboard.once('keydown-X', () => this.scene.start('GameScene', { level: 'ex' }));
   }
 
   // ── Helpers ───────────────────────────────────────────────────────
