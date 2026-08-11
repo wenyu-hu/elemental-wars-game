@@ -39,9 +39,9 @@ const ELEMENT_DEFS = {
 // window to back off or hit it first.  Numbers are first-pass and meant
 // to be tuned once the EX level's difficulty is settled.
 const ZOMBIE = {
-  hp: 6,
+  hp: 10,
   speed: 70,           // slow shamble; player runs at 200
-  damage: 12,
+  damage: 5,
   aggroRange: 460,     // starts following
   // Centre-to-centre.  Player half-width is 21 and the zombie's is now
   // ~20, so they touch at ~41 — 68 lets it swing from just under half a
@@ -50,8 +50,14 @@ const ZOMBIE = {
   windupMs: 420,       // arms raised — the telegraph
   recoverMs: 300,      // held idle after the strike
   cooldownMs: 650,     // gap before it can wind up again
+  // Knockback exists to interrupt a wind-up, not to reposition the
+  // zombie — the stun lasts but the shove is only ~18px.
   knockbackMs: 300,
-  knockbackVx: 200,
+  knockbackVx: 60,
+  // Out of aggro it turns to face the other way on this interval, so a
+  // distant zombie reads as alive rather than as scenery.
+  idleTurnMinMs: 5000,
+  idleTurnMaxMs: 8000,
 };
 
 // ─────────────────────────────────────────────
@@ -1302,7 +1308,9 @@ class GameScene extends Phaser.Scene {
                .setOffset((sprite.frame.width - BODY_W) / 2, 5);
     sprite.anims.play('zombie_idle', true);
     return { sprite, hp: ZOMBIE.hp, maxHp: ZOMBIE.hp, dead: false,
-             state: 'idle', timer: 0, cooldown: 0 };
+             state: 'idle', timer: 0, cooldown: 0,
+             // staggered so a group of zombies doesn't turn in unison
+             turnTimer: Phaser.Math.Between(ZOMBIE.idleTurnMinMs, ZOMBIE.idleTurnMaxMs) };
   }
 
   _updateZombies(delta) {
@@ -1349,19 +1357,29 @@ class GameScene extends Phaser.Scene {
         continue;
       }
 
-      // idle / walking — the zombie art faces left, so flipX turns it right.
+      // Out of aggro: hold position, unaware of the player, glancing
+      // around every few seconds rather than staring at them.
+      if (dist > ZOMBIE.aggroRange) {
+        s.body.setVelocityX(0);
+        s.anims.play('zombie_idle', true);
+        z.turnTimer -= delta;
+        if (z.turnTimer <= 0) {
+          s.setFlipX(!s.flipX);
+          z.turnTimer = Phaser.Math.Between(ZOMBIE.idleTurnMinMs, ZOMBIE.idleTurnMaxMs);
+        }
+        continue;
+      }
+
+      // In aggro — the zombie art faces left, so flipX turns it right.
       s.setFlipX(facing > 0);
       if (dist <= ZOMBIE.attackRange && z.cooldown <= 0) {
         z.state = 'windup';
         z.timer = ZOMBIE.windupMs;
         s.body.setVelocityX(0);
         s.anims.play('zombie_windup', true);
-      } else if (dist <= ZOMBIE.aggroRange && dist > ZOMBIE.attackRange) {
+      } else {
         s.body.setVelocityX(facing * ZOMBIE.speed);
         s.anims.play('zombie_walk', true);
-      } else {
-        s.body.setVelocityX(0);
-        s.anims.play('zombie_idle', true);
       }
     }
   }
