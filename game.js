@@ -645,8 +645,13 @@ class GameScene extends Phaser.Scene {
     this._skin = skinUnlocked(_saved.skin, _saved) ? _saved.skin : 'default';
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
-    this.cameras.main.setBackgroundColor(0xeef8ff);
-    this.addBackground(WORLD_W, WORLD_H);
+    if (this._levelNum === 'ex') {
+      this.cameras.main.setBackgroundColor(0x6b5518);
+      this._addBackgroundEX(WORLD_W, WORLD_H, floorY);
+    } else {
+      this.cameras.main.setBackgroundColor(0xeef8ff);
+      this.addBackground(WORLD_W, WORLD_H);
+    }
 
     // Level terrain + spike pits
     this.platforms = this.physics.add.staticGroup();
@@ -798,6 +803,73 @@ class GameScene extends Phaser.Scene {
   // ─────────────────────────────────────────────────────────────────
   //  Background
   // ─────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  //  EX level backdrop — a gold hall instead of open sky.
+  //
+  //  Drawn with Graphics rather than art, same as the cloud background,
+  //  so it costs no new assets.  Flat fills only (no gradients) to sit
+  //  alongside the pixel art, and a small vocabulary — pilasters, a
+  //  moulding, a wainscot, one diamond per bay — so it reads as trim
+  //  rather than clutter.  Golds match the anniversary palette.
+  // ─────────────────────────────────────────────────────────────────
+  _addBackgroundEX(worldW, worldH, floorY) {
+    const wallBottom = floorY - TS / 2;          // 768 — where wall meets floor
+    const BAY = 576, PIL_W = 44;                 // one pilaster every 6 tiles
+    const CORNICE_Y = 74, CORNICE_H = 14;
+    const BASE_H = 64;
+
+    const WALL    = 0xc9a227;   // field
+    const PANEL   = 0xd8b43a;   // recessed panel, a shade lighter
+    const TRIM    = 0xa8801a;   // pilaster / moulding body
+    const LIT     = 0xf0d060;   // lit edge
+    const ACCENT  = 0xffd700;   // capitals + diamonds
+
+    // Parallax on X only.  Scrolling Y too would slide the wall against
+    // the floor every time the camera rises with a jump, detaching the
+    // wainscot from the ground line.
+    const g = this.add.graphics().setScrollFactor(0.6, 1).setDepth(-8);
+
+    g.fillStyle(WALL, 1);
+    g.fillRect(0, 0, worldW, wallBottom);
+
+    // Recessed panel inside each bay.
+    g.fillStyle(PANEL, 1);
+    for (let x = 0; x < worldW; x += BAY) {
+      g.fillRect(x + PIL_W, CORNICE_Y + CORNICE_H,
+                 BAY - PIL_W * 2, wallBottom - BASE_H - CORNICE_Y - CORNICE_H);
+    }
+
+    // Cornice along the top, wainscot along the bottom.
+    g.fillStyle(TRIM, 1); g.fillRect(0, CORNICE_Y, worldW, CORNICE_H);
+    g.fillStyle(LIT,  1); g.fillRect(0, CORNICE_Y + CORNICE_H, worldW, 4);
+    g.fillStyle(TRIM, 1); g.fillRect(0, wallBottom - BASE_H, worldW, BASE_H);
+    g.fillStyle(LIT,  1); g.fillRect(0, wallBottom - BASE_H, worldW, 4);
+
+    const diamond = (cx, cy, r, colour) => {
+      g.fillStyle(colour, 1);
+      g.fillTriangle(cx, cy - r, cx + r, cy, cx, cy + r);
+      g.fillTriangle(cx, cy - r, cx - r, cy, cx, cy + r);
+    };
+
+    for (let x = 0; x < worldW; x += BAY) {
+      // Pilaster: body, lit left edge, and a brighter flute up the
+      // middle so it reads as a column rather than a flat stripe.
+      g.fillStyle(TRIM, 1); g.fillRect(x, CORNICE_Y, PIL_W, wallBottom - CORNICE_Y);
+      g.fillStyle(LIT,  1); g.fillRect(x, CORNICE_Y, 5,     wallBottom - CORNICE_Y);
+      g.fillStyle(LIT,  1); g.fillRect(x + PIL_W / 2 - 3, CORNICE_Y, 6, wallBottom - CORNICE_Y);
+      g.fillStyle(ACCENT, 1);
+      g.fillRect(x - 7, CORNICE_Y, PIL_W + 14, 12);
+      g.fillRect(x - 7, wallBottom - BASE_H - 12, PIL_W + 14, 12);
+
+      // Hollow diamond centred in the bay — outer accent, panel-coloured
+      // core so it reads as an inlay rather than a solid blob.
+      const cx = x + BAY / 2;
+      diamond(cx, 300, 30, ACCENT);
+      diamond(cx, 300, 17, PANEL);
+      diamond(cx, 300,  6, ACCENT);
+    }
+  }
+
   addBackground(worldW, worldH) {
     const clouds = this.add.graphics().setScrollFactor(0.15).setDepth(-8);
     clouds.fillStyle(0xffffff, 0.92);
