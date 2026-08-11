@@ -23,7 +23,11 @@ const TS    = TILE * SCALE;   // 96px display per tile
 const ELEMENT_DEFS = {
   fire:  { icon: 'icon_fire',  damage: 5, range: 10, reload: 3000, speed: 380, scale: 1.2, burst: [0xffd28a, 0xffa640, 0xff6a1f, 0xd83c10], burn: { ticks: 3, dmgPerTick: 1, tickMs: 1000 } },
   water: { icon: 'icon_water', damage: 2, range: 8,  reload: 2000, speed: 420, scale: 1.2, burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd], hugsGround: true, knockback: 260 },
-  air:   { icon: 'icon_air',   damage: 1, range: 5,  reload: 500,  speed: 320, scale: 0.6, burst: [0xffffff, 0xe6f4ff, 0xc9e4f7, 0xa9cfe8], knockback: 320, fitBody: false },
+  // Air's art is only 8x8 inside its 32x32 frame.  scale 2.4 makes the
+  // cropped hitbox 8*3*2.4 = 57.6px — the same size the old uncropped
+  // full-frame body had at scale 0.6 — so it keeps the generous feel
+  // that made it land, but the puff now visibly fills what it hits.
+  air:   { icon: 'icon_air',   damage: 1, range: 5,  reload: 500,  speed: 320, scale: 2.4, burst: [0xffffff, 0xe6f4ff, 0xc9e4f7, 0xa9cfe8], knockback: 320 },
   earth: { icon: 'icon_earth', damage: 8, range: 15, reload: 5000, speed: 560, scale: 0.9, burst: [0xc9b083, 0x9c7f4e, 0x6f5a33, 0x4a3c22], hugsGround: true },
 };
 
