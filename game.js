@@ -97,10 +97,11 @@ const GUARD = {
   strikeDelayMs: 180,   // "a split second after" the attack frame
   recoverMs: 420,
   cooldownMs: 1600,
-  // Roughly the bolt's visible half-width (28) plus the player's (21),
-  // so getting hit lines up with the bolt actually touching you.
-  strikeRadiusX: 50,
-  lightningMs: 300,
+  // The bolt falls from above the marked spot and damages on contact,
+  // so it sweeps the whole column — jumping over it is no longer free.
+  strikeFallHeight: 460,
+  strikeFallSpeed: 1500,   // ~0.3s from spawn to ground
+  strikeLingerMs: 110,     // brief flash on impact, then gone
   knockbackMs: 280,
   knockbackVx: 45,
   idleTurnMinMs: 5000,
@@ -679,6 +680,7 @@ class GameScene extends Phaser.Scene {
     this._hotbar = null;           // 10-slot element hotbar (rebuilt in create())
     this.zombies = null;           // EX-level zombies
     this.guards  = null;           // EX-level golden guards
+    this.lightningBolts = null;    // falling Golden Guard strikes
   }
 
   create() {
@@ -838,6 +840,11 @@ class GameScene extends Phaser.Scene {
 
       // One guard for now, past the horde — placement comes with the
       // real layout pass.
+      this.lightningBolts = this.physics.add.group({ allowGravity: false });
+      this.physics.add.overlap(
+        this.player.sprite, this.lightningBolts,
+        (_p, bolt) => this._onPlayerHitByLightning(bolt), null, this);
+
       this.guards = [this._createGuard(3200, groundTop - 120)];
       this.guards.forEach(g => {
         this.physics.add.collider(g.sprite, this.platforms);
@@ -1587,24 +1594,43 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  // Blue lightning lands at a marked ground spot, damaging the player
-  // only if they're still standing near it.
-  _spawnLightning(x, footY) {
-    // The strike art occupies x=8..27 / y=11..25 inside a 32x32 frame,
-    // so anchoring the frame's edges would float it ~21px above the
-    // ground.  Origin is set to the art's own bottom-centre instead.
-    const bolt = this.add.image(x, footY, 'lightning_strike')
-      .setOrigin(17.5 / 32, 25 / 32).setScale(SCALE).setDepth(12);
-    this.tweens.add({
-      targets: bolt, alpha: 0, duration: GUARD.lightningMs, ease: 'Quad.easeIn',
-      onComplete: () => bolt.destroy(),
-    });
+  // Drop a bolt down the marked column.  It damages whatever it touches
+  // on the way and vanishes shortly after reaching the floor, so the
+  // player has to leave the column rather than just jump.
+  _spawnLightning(x, groundY) {
+    if (!this.lightningBolts) return;
+    const bolt = this.lightningBolts.create(
+      x, groundY - GUARD.strikeFallHeight, 'lightning_strike');
+    if (!bolt) return;
+    // The art occupies x=8..27 / y=11..25 inside a 32x32 frame, so the
+    // origin is its own bottom-centre (anchoring the frame's edge would
+    // float it ~21px up) and the body is boxed to just the lit pixels.
+    bolt.setOrigin(17.5 / 32, 25 / 32).setScale(SCALE).setDepth(12);
+    bolt.body.setAllowGravity(false);
+    bolt.body.setSize(19, 14).setOffset(8, 11);
+    bolt.body.setVelocityY(GUARD.strikeFallSpeed);
+    bolt._groundY = groundY;
     this.cameras.main.shake(120, 0.006);
-    const ps = this.player.sprite;
-    if (Math.abs(ps.x - x) <= GUARD.strikeRadiusX &&
-        Math.abs(ps.body.bottom - footY) < TS) {
-      this._damagePlayer(GUARD.damage);
+  }
+
+  // Land bolts on the floor and clear them a moment later.
+  _updateLightning() {
+    if (!this.lightningBolts) return;
+    for (const b of this.lightningBolts.getChildren()) {
+      if (!b.active || b._landed || b.y < b._groundY) continue;
+      b.y = b._groundY;                 // origin is the art's base
+      b.body.setVelocityY(0);
+      b._landed = true;
+      this.time.delayedCall(GUARD.strikeLingerMs, () => b.destroy());
     }
+  }
+
+  _onPlayerHitByLightning(bolt) {
+    if (!bolt || !bolt.active) return;
+    // _damagePlayer respects i-frames, so a bolt landing during another
+    // hit's invincibility is absorbed rather than stacking.
+    this._damagePlayer(GUARD.damage);
+    bolt.destroy();
   }
 
   _hitGuard(g, dmg, fromX) {
@@ -2448,6 +2474,7 @@ class GameScene extends Phaser.Scene {
     this._updateLevel2(delta);
     this._updateZombies(delta);
     this._updateGuards(delta);
+    this._updateLightning();
   }
 
   // Per-frame tick for level-2-specific systems: ranged dummies firing,
