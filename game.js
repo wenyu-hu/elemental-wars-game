@@ -888,6 +888,14 @@ class GameScene extends Phaser.Scene {
     this._wireProjectileObstacles();
     this._applyPendingCheckpoint();
 
+    // The level start is itself a checkpoint, so dying before reaching
+    // any other one still rewinds the world properly instead of falling
+    // through to the tutorial-style respawn.  Skipped when we've just
+    // restored, since that snapshot is the one to keep.
+    if (this._hardCheckpoints && !this._checkpoint) {
+      this._setCheckpoint(this._respawnX, this._respawnY);
+    }
+
     // ── Camera ───────────────────────────────────────────────────────
     // followOffset(0, +181): Phaser subtracts the offset from the target,
     // so +181 lifts the camera focus 181 world-units ABOVE the player,
