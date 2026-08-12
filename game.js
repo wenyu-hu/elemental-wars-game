@@ -88,7 +88,7 @@ const ZOMBIE_TYPES = {
 // what gets you hit — the bolt does NOT track.
 // First-pass numbers, meant to be tuned.
 const GUARD = {
-  hp: 25,
+  hp: 30,
   speed: 55,            // slower than a zombie's 70 — it's armoured
   damage: 15,
   aggroRange: 560,
@@ -763,6 +763,10 @@ class GameScene extends Phaser.Scene {
       this.buildSpikes(floorY);
     }
 
+    // Player element shots exist in every level — the hotbar travels
+    // with the player, so it can't belong to level 2's entity setup.
+    this.elementProjectiles = this.physics.add.group({ allowGravity: false });
+
     this.player = this.createPlayer(this._respawnX, this._respawnY);
     this.physics.add.collider(this.player.sprite, this.platforms);
     this.physics.add.overlap(
@@ -836,6 +840,9 @@ class GameScene extends Phaser.Scene {
       this.zombies.forEach(z => {
         this.physics.add.collider(z.sprite, this.platforms);
         this.physics.add.collider(this.player.sprite, z.sprite);
+        this.physics.add.overlap(z.sprite, this.elementProjectiles,
+          (_s, pr) => { this._hitZombie(z, pr._damage || 1, pr.x); pr.destroy(); },
+          null, this);
       });
 
       // One guard for now, past the horde — placement comes with the
@@ -849,8 +856,13 @@ class GameScene extends Phaser.Scene {
       this.guards.forEach(g => {
         this.physics.add.collider(g.sprite, this.platforms);
         this.physics.add.collider(this.player.sprite, g.sprite);
+        this.physics.add.overlap(g.sprite, this.elementProjectiles,
+          (_s, pr) => { this._hitGuard(g, pr._damage || 1, pr.x); pr.destroy(); },
+          null, this);
       });
     }
+
+    this._wireProjectileObstacles();
 
     // ── Camera ───────────────────────────────────────────────────────
     // followOffset(0, +181): Phaser subtracts the offset from the target,
@@ -1245,8 +1257,8 @@ class GameScene extends Phaser.Scene {
     const floorSurf = groundTop;          // floor surface y (= 768)
 
     // ── Projectile groups ────────────────────────────────────────
+    // elementProjectiles is created in create() for every level.
     this.fireballs = this.physics.add.group({ allowGravity: false });
-    this.elementProjectiles = this.physics.add.group({ allowGravity: false });
 
     // ── Ranged dummies ───────────────────────────────────────────
     // Dummy 1 — far end of top safe A, before the overhead platforms.
@@ -1320,7 +1332,6 @@ class GameScene extends Phaser.Scene {
 
     // Projectiles vs. the world.  Registered last because it needs the
     // chests / moving platform / portal to already exist.
-    this._wireProjectileObstacles();
   }
 
   // Both projectile groups burst on the same set of solid things.  Uses
@@ -1355,11 +1366,13 @@ class GameScene extends Phaser.Scene {
     const shotFrom = (group, a, b) => (group.contains(a) ? a : b);
 
     for (const solid of solids) {
-      this.physics.add.overlap(
-        this.fireballs, solid,
-        (a, b) => this._onFireballHitSolid(shotFrom(this.fireballs, a, b)),
-        null, this
-      );
+      if (this.fireballs) {
+        this.physics.add.overlap(
+          this.fireballs, solid,
+          (a, b) => this._onFireballHitSolid(shotFrom(this.fireballs, a, b)),
+          null, this
+        );
+      }
       this.physics.add.overlap(
         this.elementProjectiles, solid,
         (a, b) => this._onElementHitSolid(shotFrom(this.elementProjectiles, a, b)),
@@ -2471,6 +2484,7 @@ class GameScene extends Phaser.Scene {
     this.updateDummyBar();
     this._checkDummyProximity();
     this._checkPatrolDummyProximity();
+    this._updateElements(delta);
     this._updateLevel2(delta);
     this._updateZombies(delta);
     this._updateGuards(delta);
@@ -2479,13 +2493,28 @@ class GameScene extends Phaser.Scene {
 
   // Per-frame tick for level-2-specific systems: ranged dummies firing,
   // projectile cleanup, moving platform reversal, element cooldown.
-  _updateLevel2(delta) {
-    if (this._levelNum !== 2) return;
+  // Element cooldowns and spent shots — every level, since the hotbar
+  // travels with the player.
+  _updateElements(delta) {
     if (this._hotbar) {
       for (const slot of this._hotbar) {
-        if (slot && slot.cooldownRemaining > 0) slot.cooldownRemaining = Math.max(0, slot.cooldownRemaining - delta);
+        if (slot && slot.cooldownRemaining > 0) {
+          slot.cooldownRemaining = Math.max(0, slot.cooldownRemaining - delta);
+        }
       }
     }
+    if (this.elementProjectiles) {
+      this.elementProjectiles.children.iterate(pr => {
+        if (!pr) return;
+        // Each shot has its own _maxX travel cap stored at spawn.
+        if (pr._dir > 0 && pr.x > pr._maxX) pr.destroy();
+        else if (pr._dir < 0 && pr.x < pr._maxX) pr.destroy();
+      });
+    }
+  }
+
+  _updateLevel2(delta) {
+    if (this._levelNum !== 2) return;
     this._updateRangedBars();
     this._updateBurns(delta);
 
@@ -2508,15 +2537,6 @@ class GameScene extends Phaser.Scene {
         if (fb.x < -64 || fb.x > this.physics.world.bounds.width + 64) fb.destroy();
       });
     }
-    if (this.elementProjectiles) {
-      this.elementProjectiles.children.iterate(pr => {
-        if (!pr) return;
-        // Each shot has its own _maxX/_minX travel cap stored at spawn.
-        if (pr._dir > 0 && pr.x > pr._maxX) pr.destroy();
-        else if (pr._dir < 0 && pr.x < pr._maxX) pr.destroy();
-      });
-    }
-
     // ── Moving platform: bounce between x bounds + carry rider ───
     if (this.movingPlatform) {
       const mp = this.movingPlatform;
@@ -2714,7 +2734,7 @@ class GameScene extends Phaser.Scene {
   // Fire whichever element sits in hotbar slot `idx` (0-based). Called by
   // key-press handling in _tryFireElement and by HUD slot clicks.
   _fireElementInSlot(idx) {
-    if (this._levelNum !== 2 || !this.elementProjectiles) return;
+    if (!this.elementProjectiles) return;
     const slot = this._hotbar && this._hotbar[idx];
     if (!slot || slot.cooldownRemaining > 0) return;
     const def = ELEMENT_DEFS[slot.element];
@@ -2759,7 +2779,7 @@ class GameScene extends Phaser.Scene {
   // Fire keys '1'-'8' → hotbar slots 0-7. Edge-triggered so holding
   // doesn't auto-fire — the per-slot cooldown still gates rate anyway.
   _tryFireElement(k) {
-    if (this._levelNum !== 2 || !k) return;
+    if (!k) return;
     const slotKeys = [k.one, k.two, k.three, k.four, k.five, k.six, k.seven, k.eight];
     for (let i = 0; i < slotKeys.length; i++) {
       if (slotKeys[i] && Phaser.Input.Keyboard.JustDown(slotKeys[i])) this._fireElementInSlot(i);
@@ -2854,7 +2874,7 @@ class GameScene extends Phaser.Scene {
     // stance.  Placed BEFORE the jump/duck branches so it preempts them.
     // Requires an actually-equipped shield — without one there's nothing
     // to guard with, so a player who skipped chest A can't block.
-    if (this._levelNum === 2 && (k.t.isDown || k.slash.isDown) && onGround
+    if ((k.t.isDown || k.slash.isDown) && onGround
         && this._isShielded()) {
       this._tryFireElement(k);
       this.applyHorizontalMove(p, k, 1);
