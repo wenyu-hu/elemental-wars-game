@@ -774,11 +774,22 @@ class GameScene extends Phaser.Scene {
     } else if (this._levelNum === 2) {
       this._buildLevel2Entities(floorY, groundTop);
     } else if (this._levelNum === 'ex') {
-      // Two test zombies while the level's real layout is designed.
+      // Three escalating waves across the level: a lone zombie to teach
+      // the pattern, a horde to pressure it, then a swarm.  Each group is
+      // spread over a span with a little jitter so they don't spawn in a
+      // single stack — they have no zombie-vs-zombie collider, so they
+      // pack together as they close in.
+      const spread = (n, from, to, type) =>
+        Array.from({ length: n }, (_, i) => this._createZombie(
+          from + (n === 1 ? 0 : (to - from) * i / (n - 1)) + Phaser.Math.Between(-20, 20),
+          groundTop - 80, type));
+
       this.zombies = [
-        this._createZombie(1400, groundTop - 80),
-        this._createZombie(2600, groundTop - 80),
-        this._createZombie(3600, groundTop - 80, 'butler'),
+        ...spread(1,  1400, 1400, 'normal'),   // first contact
+        ...spread(5,  2450, 2900, 'normal'),   // horde
+        ...spread(1,  2675, 2675, 'butler'),
+        ...spread(20, 3550, 4650, 'normal'),   // swarm
+        ...spread(5,  3700, 4500, 'butler'),
       ];
       this.zombies.forEach(z => {
         this.physics.add.collider(z.sprite, this.platforms);
