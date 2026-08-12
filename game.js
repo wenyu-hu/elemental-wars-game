@@ -80,6 +80,39 @@ const ZOMBIE_TYPES = {
 };
 
 // ─────────────────────────────────────────────
+//  Golden Guard (EX level)
+// ─────────────────────────────────────────────
+// A tall, slow, heavily-armoured peon.  Raises its spear to telegraph,
+// marking where the player stood at that instant; a moment later blue
+// lightning falls on that spot.  Standing still through the tell is
+// what gets you hit — the bolt does NOT track.
+// First-pass numbers, meant to be tuned.
+const GUARD = {
+  hp: 25,
+  speed: 55,            // slower than a zombie's 70 — it's armoured
+  damage: 15,
+  aggroRange: 560,
+  attackRange: 300,     // strikes at range, not in melee
+  windupMs: 520,        // spear raised: the dodge window
+  strikeDelayMs: 180,   // "a split second after" the attack frame
+  recoverMs: 420,
+  cooldownMs: 1600,
+  // Roughly the bolt's visible half-width (28) plus the player's (21),
+  // so getting hit lines up with the bolt actually touching you.
+  strikeRadiusX: 50,
+  lightningMs: 300,
+  knockbackMs: 280,
+  knockbackVx: 45,
+  idleTurnMinMs: 5000,
+  idleTurnMaxMs: 8000,
+};
+// Body box in unscaled texture px.  Columns 5-7 are the spear shaft
+// (40+px tall) and would balloon the hitbox, so the box covers the
+// torso only, x=10..27 / y=10..54 (54 is the feet).  It's off-centre in
+// the frame, so the offset is mirrored on flip — Phaser won't do it.
+const GUARD_BODY = { x: 10, y: 10, w: 17, h: 44 };
+
+// ─────────────────────────────────────────────
 //  Player skins
 // ─────────────────────────────────────────────
 // Every skin ships the same set of animations, distinguished by suffix
@@ -339,6 +372,9 @@ class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('player_gold',   'assets/skins/Main Character - Gold Skin.png',   { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('dummy',         'assets/enemies/dummy.png',  { frameWidth: 27, frameHeight: 25 });
     this.load.spritesheet('zombie',        'assets/enemies/Zombie.png', { frameWidth: 32, frameHeight: 32 });
+    // Golden Guard frames are 32x64 — twice as tall as everything else.
+    this.load.spritesheet('golden_guard',  'assets/enemies/Golden Guard.png', { frameWidth: 32, frameHeight: 64 });
+    this.load.image('lightning_strike',    'assets/Blue Lightning Strike.png');
     this.load.spritesheet('zombie_butler', 'assets/enemies/Butler Zombie.png', { frameWidth: 32, frameHeight: 32 });
     this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 14, frameHeight: 16 });
     this.load.image('item_wooden_sword',  'assets/items/Sword.png');
@@ -407,6 +443,8 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('dummy',         0xcc4444, 2, 27, 25);
     makeSheet('zombie',        0x2f6b2f, 6, 32, 32);
     makeSheet('zombie_butler', 0x1f4b2f, 5, 32, 32);
+    makeSheet('golden_guard',  0xe8c33a, 3, 32, 64);
+    makeImg  ('lightning_strike', 0x9be3ff, 32, 32);
     makeSheet('chest',         0xcc9922, 2, 14, 16);
     makeImg  ('ground',        0x4a9944, 32, 32);
     makeImg  ('dirt',          0x3d2008, 32, 32);
@@ -640,6 +678,7 @@ class GameScene extends Phaser.Scene {
     this._level2Complete = false;
     this._hotbar = null;           // 10-slot element hotbar (rebuilt in create())
     this.zombies = null;           // EX-level zombies
+    this.guards  = null;           // EX-level golden guards
   }
 
   create() {
@@ -651,6 +690,7 @@ class GameScene extends Phaser.Scene {
     const WORLD_H   = 1200;
     const floorY    = WORLD_H - 4 * TS;       // grass tile centre  y = 816
     const groundTop = floorY - TS / 2;         // grass surface      y = 768
+    this._groundTopY = groundTop;              // where ground-targeted FX land
 
     this._respawnX    = 120;
     this._respawnY    = groundTop - 120;
@@ -794,6 +834,14 @@ class GameScene extends Phaser.Scene {
       this.zombies.forEach(z => {
         this.physics.add.collider(z.sprite, this.platforms);
         this.physics.add.collider(this.player.sprite, z.sprite);
+      });
+
+      // One guard for now, past the horde — placement comes with the
+      // real layout pass.
+      this.guards = [this._createGuard(3200, groundTop - 120)];
+      this.guards.forEach(g => {
+        this.physics.add.collider(g.sprite, this.platforms);
+        this.physics.add.collider(this.player.sprite, g.sprite);
       });
     }
 
@@ -1439,6 +1487,146 @@ class GameScene extends Phaser.Scene {
     s.body.setVelocityX((Math.sign(s.x - fromX) || 1) * cfg.knockbackVx);
   }
 
+  // ─────────────────────────────────────────────────────────────────
+  //  Golden Guard
+  //
+  //  idle -> walk -> attack (spear up, marks the player's spot) ->
+  //  strike (lightning falls on the marked spot) -> recover.
+  //  The mark is taken once, when the attack frame plays, so walking
+  //  out of it dodges the bolt entirely.
+  // ─────────────────────────────────────────────────────────────────
+  _createGuard(x, y) {
+    const sprite = this.physics.add.sprite(x, y, 'golden_guard').setScale(SCALE);
+    sprite.body.setAllowGravity(true);
+    sprite.body.pushable = false;
+    sprite.body.setSize(GUARD_BODY.w, GUARD_BODY.h);
+    sprite.anims.play('gg_idle', true);
+    return { sprite, hp: GUARD.hp, maxHp: GUARD.hp, dead: false,
+             state: 'idle', timer: 0, cooldown: 0,
+             targetX: 0, targetY: 0,
+             turnTimer: Phaser.Math.Between(GUARD.idleTurnMinMs, GUARD.idleTurnMaxMs) };
+  }
+
+  _updateGuards(delta) {
+    if (!this.guards || !this.player) return;
+    const ps = this.player.sprite;
+    for (const g of this.guards) {
+      if (g.dead || !g.sprite.active) continue;
+      const s = g.sprite;
+      if (g.timer    > 0) g.timer    -= delta;
+      if (g.cooldown > 0) g.cooldown -= delta;
+
+      // The body box sits right of frame centre (the spear is on the
+      // left), so mirror the offset by hand — flipX doesn't move it.
+      s.body.setOffset(
+        s.flipX ? 32 - GUARD_BODY.x - GUARD_BODY.w : GUARD_BODY.x,
+        GUARD_BODY.y);
+
+      if (g.state === 'knockback') {
+        if (g.timer <= 0) { g.state = 'idle'; s.body.setVelocityX(0); s.anims.play('gg_idle', true); }
+        continue;
+      }
+
+      // Spear is up: hold still, then drop the bolt on the marked spot.
+      if (g.state === 'attack') {
+        s.body.setVelocityX(0);
+        if (g.timer <= 0) {
+          g.state = 'strike';
+          g.timer = GUARD.strikeDelayMs;
+        }
+        continue;
+      }
+      if (g.state === 'strike') {
+        s.body.setVelocityX(0);
+        if (g.timer <= 0) {
+          this._spawnLightning(g.targetX, g.targetY);
+          s.anims.play('gg_idle', true);
+          g.state    = 'recover';
+          g.timer    = GUARD.recoverMs;
+          g.cooldown = GUARD.cooldownMs;
+        }
+        continue;
+      }
+      if (g.state === 'recover') {
+        s.body.setVelocityX(0);
+        if (g.timer <= 0) g.state = 'idle';
+        continue;
+      }
+
+      const dx   = ps.x - s.x;
+      const dist = Math.abs(dx);
+
+      if (dist > GUARD.aggroRange) {
+        s.body.setVelocityX(0);
+        s.anims.play('gg_idle', true);
+        g.turnTimer -= delta;
+        if (g.turnTimer <= 0) {
+          s.setFlipX(!s.flipX);
+          g.turnTimer = Phaser.Math.Between(GUARD.idleTurnMinMs, GUARD.idleTurnMaxMs);
+        }
+        continue;
+      }
+
+      s.setFlipX(dx > 0);
+      if (dist <= GUARD.attackRange && g.cooldown <= 0) {
+        g.state   = 'attack';
+        g.timer   = GUARD.windupMs;
+        // Mark the spot once, now.  The bolt lands on the FLOOR at that
+        // x — not at the player's feet, which may be mid-jump.
+        g.targetX = ps.x;
+        g.targetY = this._groundTopY;
+        s.body.setVelocityX(0);
+        s.anims.play('gg_attack', true);
+      } else if (dist > GUARD.attackRange) {
+        s.body.setVelocityX(Math.sign(dx) * GUARD.speed);
+        s.anims.play('gg_walk', true);
+      } else {
+        s.body.setVelocityX(0);
+        s.anims.play('gg_idle', true);
+      }
+    }
+  }
+
+  // Blue lightning lands at a marked ground spot, damaging the player
+  // only if they're still standing near it.
+  _spawnLightning(x, footY) {
+    // The strike art occupies x=8..27 / y=11..25 inside a 32x32 frame,
+    // so anchoring the frame's edges would float it ~21px above the
+    // ground.  Origin is set to the art's own bottom-centre instead.
+    const bolt = this.add.image(x, footY, 'lightning_strike')
+      .setOrigin(17.5 / 32, 25 / 32).setScale(SCALE).setDepth(12);
+    this.tweens.add({
+      targets: bolt, alpha: 0, duration: GUARD.lightningMs, ease: 'Quad.easeIn',
+      onComplete: () => bolt.destroy(),
+    });
+    this.cameras.main.shake(120, 0.006);
+    const ps = this.player.sprite;
+    if (Math.abs(ps.x - x) <= GUARD.strikeRadiusX &&
+        Math.abs(ps.body.bottom - footY) < TS) {
+      this._damagePlayer(GUARD.damage);
+    }
+  }
+
+  _hitGuard(g, dmg, fromX) {
+    if (!g || g.dead) return;
+    const s = g.sprite;
+    g.hp = Math.max(0, g.hp - dmg);
+    if (g.hp <= 0) {
+      g.dead = true;
+      s.body.setVelocityX(0);
+      this.tweens.add({
+        targets: s, angle: 90, alpha: 0, duration: 380, ease: 'Power2',
+        onComplete: () => s.destroy(),
+      });
+      return;
+    }
+    s.setTintFill(0xffffff);
+    this.time.delayedCall(80, () => { if (!g.dead) s.clearTint(); });
+    g.state = 'knockback';
+    g.timer = GUARD.knockbackMs;
+    s.body.setVelocityX((Math.sign(s.x - fromX) || 1) * GUARD.knockbackVx);
+  }
+
   _createRangedDummy(x, y) {
     const sprite = this.physics.add.sprite(x, y, 'ranged_dummy').setScale(SCALE);
     sprite.body.setAllowGravity(true);
@@ -1890,6 +2078,12 @@ class GameScene extends Phaser.Scene {
     add('butler_windup',    'zombie_butler', 3, 3, 4, 0);
     add('butler_knockback', 'zombie_butler', 4, 4, 4, 0);
 
+    // ── Golden Guard ─────────────────────────────────────────────
+    // Walking is a fast alternation between the idle and walk frames.
+    add('gg_idle',   'golden_guard', 0, 0, 4);
+    add('gg_walk',   'golden_guard', 0, 1, 10);
+    add('gg_attack', 'golden_guard', 2, 2, 4, 0);
+
     add('dummy_idle',   'dummy',         0, 0,  4);
     add('dummy_hit',    'dummy',         1, 1,  4, 0);
     add('chest_closed', 'chest',         0, 0,  4);
@@ -2253,6 +2447,7 @@ class GameScene extends Phaser.Scene {
     this._checkPatrolDummyProximity();
     this._updateLevel2(delta);
     this._updateZombies(delta);
+    this._updateGuards(delta);
   }
 
   // Per-frame tick for level-2-specific systems: ranged dummies firing,
@@ -2829,6 +3024,16 @@ class GameScene extends Phaser.Scene {
 
   checkAttackHit() {
     const ps = this.player.sprite, reach = TS * 1.3;
+    if (this.guards) {
+      for (const g of this.guards) {
+        if (g.dead || !g.sprite.active) continue;
+        const gs2 = g.sprite;
+        const facing = ps.flipX ? gs2.x > ps.x : gs2.x < ps.x;
+        if (Math.abs(ps.x - gs2.x) < reach && Math.abs(ps.y - gs2.y) < TS * 1.5 && facing) {
+          this._hitGuard(g, this._meleeDamage(), ps.x);
+        }
+      }
+    }
     if (this.zombies) {
       for (const z of this.zombies) {
         if (z.dead || !z.sprite.active) continue;
