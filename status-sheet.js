@@ -143,6 +143,16 @@
   function reset() { state = defaultSheet(); persist(); }
   function getState() { return state; }
 
+  // Checkpoint support.  getState() hands back the live object, so a
+  // caller holding it would see later mutations — snapshotState deep
+  // copies instead, and restoreState puts a snapshot back wholesale.
+  function snapshotState() { return JSON.parse(JSON.stringify(state)); }
+  function restoreState(snap) {
+    if (!snap) return;
+    state = JSON.parse(JSON.stringify(snap));
+    persist();
+  }
+
   // ── Item / equip API ─────────────────────────
   function ensureRegistry() {
     if (!window.itemRegistry) throw new Error('itemRegistry not loaded — make sure items.js is included before status-sheet.js');
@@ -773,6 +783,7 @@
     loadFromProgress,
     reset,
     getState,
+    snapshotState, restoreState,
     setStat, addStat,
     setIdentity,
 

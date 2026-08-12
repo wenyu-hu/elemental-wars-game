@@ -681,6 +681,8 @@ class GameScene extends Phaser.Scene {
     this.zombies = null;           // EX-level zombies
     this.guards  = null;           // EX-level golden guards
     this.lightningBolts = null;    // falling Golden Guard strikes
+    this._checkpoint = null;       // last world snapshot (hard-checkpoint levels)
+    this._pendingCheckpoint = (data && data.checkpoint) || null;
   }
 
   create() {
@@ -825,21 +827,38 @@ class GameScene extends Phaser.Scene {
       // spread over a span with a little jitter so they don't spawn in a
       // single stack — they have no zombie-vs-zombie collider, so they
       // pack together as they close in.
+      // Build the roster first so every enemy gets a stable index-based
+      // id, then create only those the checkpoint says were alive.  The
+      // dead are never constructed, so no death path (and no drop) runs.
       const spread = (n, from, to, type) =>
-        Array.from({ length: n }, (_, i) => this._createZombie(
-          from + (n === 1 ? 0 : (to - from) * i / (n - 1)) + Phaser.Math.Between(-20, 20),
-          groundTop - 80, type));
+        Array.from({ length: n }, (_, i) => ({
+          type,
+          x: from + (n === 1 ? 0 : (to - from) * i / (n - 1)) + Phaser.Math.Between(-20, 20),
+        }));
+      const cp      = this._pendingCheckpoint;
+      const allowed = cp ? new Set(cp.alive) : null;
+      const spawn = (specs, prefix, make) => {
+        const out = [];
+        specs.forEach((sp, i) => {
+          const cpId = prefix + i;
+          if (allowed && !allowed.has(cpId)) return;
+          const e = make(sp);
+          e.cpId = cpId;
+          out.push(e);
+        });
+        return out;
+      };
 
       // Gaps between waves (and from spawn to the first) are 20% tighter
       // than the original pass — each wave keeps its own spread, only the
       // empty space between them shrank.
-      this.zombies = [
+      this.zombies = spawn([
         ...spread(1,  1150, 1150, 'normal'),   // first contact
         ...spread(5,  1980, 2430, 'normal'),   // horde
         ...spread(1,  2205, 2205, 'butler'),
         ...spread(20, 2950, 4050, 'normal'),   // swarm
         ...spread(5,  3100, 3900, 'butler'),
-      ];
+      ], 'z', sp => this._createZombie(sp.x, groundTop - 80, sp.type));
       this.zombies.forEach(z => {
         this.physics.add.collider(z.sprite, this.platforms);
         this.physics.add.collider(this.player.sprite, z.sprite);
@@ -855,7 +874,8 @@ class GameScene extends Phaser.Scene {
 
       // Stationed inside the swarm, near its far end, so the third wave
       // is the one that forces you to dodge bolts while surrounded.
-      this.guards = [this._createGuard(3980, groundTop - 120)];
+      this.guards = spawn([{ x: 3980 }], 'g',
+        sp => this._createGuard(sp.x, groundTop - 120));
       this.guards.forEach(g => {
         this.physics.add.collider(g.sprite, this.platforms);
         this.physics.add.collider(this.player.sprite, g.sprite);
@@ -866,6 +886,7 @@ class GameScene extends Phaser.Scene {
     }
 
     this._wireProjectileObstacles();
+    this._applyPendingCheckpoint();
 
     // ── Camera ───────────────────────────────────────────────────────
     // followOffset(0, +181): Phaser subtracts the offset from the target,
@@ -1826,9 +1847,85 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  // ─────────────────────────────────────────────────────────────────
+  //  Checkpoints
+  //
+  //  Tutorial levels (1-5) stay forgiving: death just moves the player
+  //  back and everything they killed stays dead, so a cleared stretch
+  //  costs nothing to re-cross.  From level 6 on (and in the EX level)
+  //  death rewinds the world to the last checkpoint instead — enemies
+  //  that were alive then come back, and items and XP picked up since
+  //  are handed back with them, so dying can't be farmed for loot.
+  // ─────────────────────────────────────────────────────────────────
+  get _hardCheckpoints() {
+    return this._levelNum === 'ex' ||
+           (typeof this._levelNum === 'number' && this._levelNum >= 6);
+  }
+
+  // Put the player back where they died-from and hand back the XP,
+  // level and inventory they had at that moment.  Enemy filtering has
+  // already happened at spawn time.
+  _applyPendingCheckpoint() {
+    const cp = this._pendingCheckpoint;
+    if (!cp) return;
+    this._respawnX = cp.x;
+    this._respawnY = cp.y;
+    this.player.sprite.setPosition(cp.x, cp.y);
+    this.player.sprite.body.setVelocity(0, 0);
+    this._xp       = cp.xp;
+    this._level    = cp.level;
+    this._xpToNext = cp.xpToNext;
+    this._hp       = this._maxHp;              // full heal on respawn
+    if (cp.sheet && window.statusSheet) window.statusSheet.restoreState(cp.sheet);
+    // Carry the snapshot forward so the next death rewinds here again.
+    this._checkpoint = cp;
+    this._pendingCheckpoint = null;
+    this.cameras.main.fadeIn(300, 0, 0, 0);
+  }
+
+  _setCheckpoint(x, y) {
+    this._respawnX = x;
+    this._respawnY = y;
+    this._refreshCheckpointState();
+  }
+
+  // Snapshot the world as it stands right now.  Taken when a checkpoint
+  // is reached and again once a chest has finished handing over its
+  // rewards — that ordering is what lets the player keep the chest's
+  // contents through a later death, since the chest IS the checkpoint.
+  _refreshCheckpointState() {
+    if (!this._hardCheckpoints) return;
+    const alive = [];
+    for (const z of this.zombies || []) if (!z.dead) alive.push(z.cpId);
+    for (const g of this.guards  || []) if (!g.dead) alive.push(g.cpId);
+    this._checkpoint = {
+      x: this._respawnX, y: this._respawnY,
+      alive,
+      xp: this._xp, level: this._level, xpToNext: this._xpToNext,
+      sheet: window.statusSheet ? window.statusSheet.snapshotState() : null,
+    };
+  }
+
+  // Rewind to the last checkpoint by rebuilding the level.  Restarting
+  // beats resurrecting sprites in place: no stale bodies or timers, and
+  // crucially the dead enemies are never re-created, so nothing runs
+  // their death path and drops duplicate loot.
+  _restartAtCheckpoint() {
+    const cp = this._checkpoint;
+    this.scene.start('GameScene', { level: this._levelNum, checkpoint: cp });
+  }
+
   respawnPlayer() {
     if (this._spikeHit) return;
     this._spikeHit = true;
+
+    if (this._hardCheckpoints && this._checkpoint) {
+      this.player.sprite.setTintFill(0xff4444);
+      this.cameras.main.shake(180, 0.011);
+      this.cameras.main.fade(420, 0, 0, 0);
+      this.time.delayedCall(460, () => this._restartAtCheckpoint());
+      return;
+    }
 
     const p = this.player;
     p.isAttacking = false;
@@ -3155,8 +3252,7 @@ class GameScene extends Phaser.Scene {
     c.sprite.anims.play('chest_open', true);
     this.tweens.add({ targets: c.sprite, scaleX: 5 * 1.15, scaleY: 5 * 1.15,
       duration: 120, yoyo: true, repeat: 2 });
-    this._respawnX = c.sprite.x - 80;
-    this._respawnY = c.sprite.y - 30;
+    this._setCheckpoint(c.sprite.x - 80, c.sprite.y - 30);
 
     const firstChestA = c.tag === 'A' && !this.registry.get('level2ChestAOpened');
     if (firstChestA) {
@@ -3262,8 +3358,7 @@ class GameScene extends Phaser.Scene {
     this.tweens.add({ targets:c.sprite, scaleX:5*1.15, scaleY:5*1.15,
       duration:120, yoyo:true, repeat:2 });
     // Update respawn checkpoint to just left of the chest
-    this._respawnX = c.sprite.x - 80;
-    this._respawnY = c.sprite.y - 30;
+    this._setCheckpoint(c.sprite.x - 80, c.sprite.y - 30);
 
     // First time on this save: play the cinematic and award the tutorial
     // sword.  On replay runs the chest just shows the regular Checkpoint!
@@ -3574,6 +3669,9 @@ class GameScene extends Phaser.Scene {
       this._playElementChoiceScreen(() => this._runPendingElementChoices());
     } else {
       this._chestSequenceActive = false;
+      // The chest IS the checkpoint, so fold its rewards into the
+      // snapshot — otherwise a later death would rewind past them.
+      this._refreshCheckpointState();
     }
   }
 
