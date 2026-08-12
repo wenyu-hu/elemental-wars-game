@@ -830,12 +830,15 @@ class GameScene extends Phaser.Scene {
           from + (n === 1 ? 0 : (to - from) * i / (n - 1)) + Phaser.Math.Between(-20, 20),
           groundTop - 80, type));
 
+      // Gaps between waves (and from spawn to the first) are 20% tighter
+      // than the original pass — each wave keeps its own spread, only the
+      // empty space between them shrank.
       this.zombies = [
-        ...spread(1,  1400, 1400, 'normal'),   // first contact
-        ...spread(5,  2450, 2900, 'normal'),   // horde
-        ...spread(1,  2675, 2675, 'butler'),
-        ...spread(20, 3550, 4650, 'normal'),   // swarm
-        ...spread(5,  3700, 4500, 'butler'),
+        ...spread(1,  1150, 1150, 'normal'),   // first contact
+        ...spread(5,  1980, 2430, 'normal'),   // horde
+        ...spread(1,  2205, 2205, 'butler'),
+        ...spread(20, 2950, 4050, 'normal'),   // swarm
+        ...spread(5,  3100, 3900, 'butler'),
       ];
       this.zombies.forEach(z => {
         this.physics.add.collider(z.sprite, this.platforms);
@@ -845,14 +848,14 @@ class GameScene extends Phaser.Scene {
           null, this);
       });
 
-      // One guard for now, past the horde — placement comes with the
-      // real layout pass.
       this.lightningBolts = this.physics.add.group({ allowGravity: false });
       this.physics.add.overlap(
         this.player.sprite, this.lightningBolts,
         (_p, bolt) => this._onPlayerHitByLightning(bolt), null, this);
 
-      this.guards = [this._createGuard(3200, groundTop - 120)];
+      // Stationed inside the swarm, near its far end, so the third wave
+      // is the one that forces you to dodge bolts while surrounded.
+      this.guards = [this._createGuard(3980, groundTop - 120)];
       this.guards.forEach(g => {
         this.physics.add.collider(g.sprite, this.platforms);
         this.physics.add.collider(this.player.sprite, g.sprite);
