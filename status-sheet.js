@@ -278,20 +278,49 @@
 
   // Consume one of `itemId` from inventory.  Pushes the item's effect+duration
   // onto activeEffects with an expiry timestamp.  Returns true on success.
-  function consume(itemId) {
+  // Eat/drink one.  Restores `heal` HP into state.hp, which the game
+  // reads back when the sheet closes — the sheet doesn't own the live
+  // HP, GameScene does.
+  function consume(itemId) { return consumeCount(itemId, 1); }
+
+  // Eat every copy in the stack at once.
+  function consumeAll(itemId) {
+    const held = countOf(itemId);
+    return held ? consumeCount(itemId, held) : false;
+  }
+
+  function countOf(itemId) {
+    let n = 0;
+    for (const slot of state.inventory) {
+      if (slot && slot.itemId === itemId) n += (Number(slot.count) || 1);
+    }
+    return n;
+  }
+
+  function consumeCount(itemId, count) {
     ensureRegistry();
     const item = window.itemRegistry.get(itemId);
     if (!item) return false;
     const typeDef = window.itemRegistry.types[item.type];
     if (!typeDef || !typeDef.consumable) return false;
-    if (takeItem(itemId, 1) === 0) return false;
+    const taken = takeItem(itemId, count);
+    if (taken === 0) return false;
+
+    const heal = (Number(item.stats.heal) || 0) * taken;
+    if (heal > 0) {
+      const max = Number(state.hp.max) || 0;
+      const cur = Number(state.hp.current) || 0;
+      state.hp.current = max > 0 ? Math.min(max, cur + heal) : cur + heal;
+    }
     const dur = Number(item.stats.duration) || 0;
-    state.activeEffects.push({
-      name:     item.name,
-      effect:   item.stats.effect || '',
-      duration: dur,
-      expiresAt: dur > 0 ? Date.now() + dur * 1000 : 0,
-    });
+    if (item.stats.effect || dur > 0) {
+      state.activeEffects.push({
+        name:     item.name,
+        effect:   item.stats.effect || '',
+        duration: dur,
+        expiresAt: dur > 0 ? Date.now() + dur * 1000 : 0,
+      });
+    }
     persist();
     return true;
   }
@@ -566,6 +595,9 @@
       }
       const cls = ['inv-cell'];
       if (item.rarity) cls.push('rarity-' + item.rarity);
+      // Food is marked by type rather than rarity — it gets a white
+      // outline whatever its rarity happens to be.
+      cls.push('type-' + item.type);
       if (selection && selection.kind === 'inventory' && selection.index === i) cls.push('is-selected');
       const inner = item.iconSrc
         ? `<img class="inv-icon" src="${escapeHtml(item.iconSrc)}" alt="">`
@@ -634,7 +666,13 @@
           : `<button class="ew-equip-btn" data-action="equip">Equip</button>`;
       }
     } else if (typeDef.consumable && fromInventory) {
-      actionBtn = `<button class="ew-equip-btn consume" data-action="consume">Consume</button>`;
+      const verb = item.type === 'food' ? 'Eat' : 'Consume';
+      const held = countOf(item.id);
+      actionBtn = `<button class="ew-equip-btn consume" data-action="consume">${verb}</button>`;
+      // Only worth offering when there's more than one to work through.
+      if (held > 1) {
+        actionBtn += `<button class="ew-equip-btn consume-all" data-action="consume-all">${verb} all (${held})</button>`;
+      }
     }
 
     let statsHtml = '';
@@ -661,8 +699,7 @@
       ${actionBtn}
     `;
     sb.querySelector('.ew-sidebar-close').addEventListener('click', () => { selection = null; render(); });
-    const btn = sb.querySelector('.ew-equip-btn');
-    if (btn) {
+    sb.querySelectorAll('.ew-equip-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const action = btn.dataset.action;
         if (action === 'equip') {
@@ -673,12 +710,16 @@
           selection = { kind: 'equipment', slotKey: typeDef.slot };
         } else if (action === 'consume') {
           consume(item.id);
-          // Item gone from inventory; close the sidebar.
+          // Keep the profile open while copies remain, so eating through
+          // a stack doesn't need a re-click each time.
+          if (!countOf(item.id)) selection = null;
+        } else if (action === 'consume-all') {
+          consumeAll(item.id);
           selection = null;
         }
         render();
       });
-    }
+    });
   }
 
   // ── Click wiring (rebuilt every render) ──────
@@ -788,10 +829,10 @@
     setIdentity,
 
     // Item-driven API
-    giveItem, takeItem,
+    giveItem, takeItem, countOf,
     equip,    unequip,
     removeItemEverywhere,
-    consume,
+    consume, consumeAll,
     award,
     addEnchantment,
 

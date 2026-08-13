@@ -311,6 +311,7 @@
   word-break: break-word; line-height: 1.2;
   color: var(--text-primary); flex-direction: column;
 }
+#ew-status-overlay .inv-cell.type-food        { border: 2px solid #ffffff; }
 #ew-status-overlay .inv-cell.rarity-common    { border: 2px solid #888; }
 #ew-status-overlay .inv-cell.rarity-uncommon  { border: 2px solid #2ecc40; }
 #ew-status-overlay .inv-cell.rarity-rare      { border: 2px solid #3498db; }

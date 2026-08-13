@@ -114,6 +114,18 @@ const GUARD = {
 const GUARD_BODY = { x: 10, y: 10, w: 17, h: 44 };
 
 // ─────────────────────────────────────────────
+//  Food drops
+// ─────────────────────────────────────────────
+// Butler zombies only.  Each roll is independent, so one butler can
+// drop all three — or nothing.  Drops lie where the butler fell and are
+// picked up by walking over them.
+const FOOD_DROPS = [
+  { id: 'apple',  chance: 0.70, color: 0xe23b3b },
+  { id: 'orange', chance: 0.55, color: 0xef8a1b },
+  { id: 'banana', chance: 0.40, color: 0xf2d13b },
+];
+
+// ─────────────────────────────────────────────
 //  Golden Emperor (boss room)
 // ─────────────────────────────────────────────
 // Stationary on the right, immune to knockback so he can't be combo
@@ -851,6 +863,7 @@ class GameScene extends Phaser.Scene {
     this.zombies = null;           // EX-level zombies
     this.guards  = null;           // EX-level golden guards
     this.lightningBolts = null;    // falling Golden Guard strikes
+    this.foodDrops = null;         // butler food lying on the ground
     this.emperor = null;           // boss-room Golden Emperor
     this.surges  = null;           // his Dark Surge geysers
     this._guardTimer = 0;
@@ -946,9 +959,13 @@ class GameScene extends Phaser.Scene {
     // Player element shots exist in every level — the hotbar travels
     // with the player, so it can't belong to level 2's entity setup.
     this.elementProjectiles = this.physics.add.group({ allowGravity: false });
+    // Food dropped by butlers — any level they can appear in.
+    this.foodDrops = this.physics.add.group();
 
     this.player = this.createPlayer(this._respawnX, this._respawnY);
     this.physics.add.collider(this.player.sprite, this.platforms);
+    this.physics.add.overlap(this.player.sprite, this.foodDrops,
+      (_p, drop) => this._collectFood(drop), null, this);
     this.physics.add.overlap(
       this.player.sprite, this.spikes,
       () => this.hitBySpikes(), null, this
@@ -1748,6 +1765,43 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  // Roll each food independently and scatter whatever drops.
+  _dropFood(x, y) {
+    if (!this.foodDrops) return;
+    const won = FOOD_DROPS.filter(f => Math.random() < f.chance);
+    won.forEach((f, i) => {
+      // Fan multiple drops out so they don't stack invisibly.
+      const dx = won.length === 1 ? 0 : (i - (won.length - 1) / 2) * 34;
+      const d = this.foodDrops.create(x + dx, y - 20, '__WHITE');
+      if (!d) return;
+      d._foodId = f.id;
+      d.setDisplaySize(20, 20).setTint(f.color).setDepth(9);
+      d.body.setAllowGravity(true);
+      d.body.setBounce(0.35);
+      d.body.setDragX(140);
+      d.body.setVelocity(Phaser.Math.Between(-40, 40), -140);
+      this.physics.add.collider(d, this.platforms);
+      this.tweens.add({ targets: d, scaleX: d.scaleX * 1.15, scaleY: d.scaleY * 1.15,
+                        duration: 420, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    });
+  }
+
+  _collectFood(drop) {
+    if (!drop || !drop.active) return;
+    const id = drop._foodId;
+    drop.destroy();
+    if (window.statusSheet && window.statusSheet.giveItem) {
+      window.statusSheet.giveItem(id, 1);
+    }
+    const item = window.itemRegistry && window.itemRegistry.get(id);
+    const label = this.add.text(drop.x, drop.y - 10, `+ ${item ? item.name : id}`, {
+      fontSize: '13px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', stroke: '#000000', strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(20);
+    this.tweens.add({ targets: label, y: label.y - 28, alpha: 0,
+                      duration: 700, onComplete: () => label.destroy() });
+  }
+
   // Damage a zombie and knock it away from `fromX`.  The knockback frame
   // is already drawn red, so no hit-flash tint is layered on top.
   _hitZombie(z, dmg, fromX) {
@@ -1757,6 +1811,8 @@ class GameScene extends Phaser.Scene {
     if (z.hp <= 0) {
       z.dead = true;
       s.body.setVelocityX(0);
+      // Only butlers carry food.
+      if (z.type === 'butler') this._dropFood(s.x, s.y);
       this.tweens.add({
         targets: s, angle: 90, alpha: 0, duration: 360, ease: 'Power2',
         onComplete: () => s.destroy(),
@@ -5033,7 +5089,15 @@ class HUDScene extends Phaser.Scene {
       window.statusSheet.setStat('level',      gs._level);
     }
     window.statusSheet.open({
-      onClose: () => { if (gs && !wasPaused) gs.togglePause(); },
+      onClose: () => {
+        // Eating heals inside the sheet, but GameScene owns the live HP —
+        // read it back so food actually restores health in play.
+        if (gs && window.statusSheet.getState) {
+          const cur = Number(window.statusSheet.getState().hp.current);
+          if (Number.isFinite(cur)) gs._hp = Phaser.Math.Clamp(cur, 0, gs._maxHp);
+        }
+        if (gs && !wasPaused) gs.togglePause();
+      },
     });
   }
 
