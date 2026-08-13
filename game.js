@@ -144,6 +144,8 @@ const EMPEROR = {
   summonCount: 5,
   burrowMs: 700,        // butlers claw up before they can act
 
+  yOffset: 20,          // sits this far below the floor line
+
   guardFirstMs: 2000,   // first guard shortly after the fight starts
   guardEveryMs: 45000,
   guardMaxAlive: 3,
@@ -1083,6 +1085,8 @@ class GameScene extends Phaser.Scene {
         (_p, bolt) => this._onPlayerHitByLightning(bolt), null, this);
       this.emperor = this._createEmperor(
         this.physics.world.bounds.width - 190, groundTop);
+      // He's a wall, not a ghost — the player can't walk through the throne.
+      this.physics.add.collider(this.player.sprite, this.emperor.sprite);
       this.physics.add.overlap(this.emperor.sprite, this.elementProjectiles,
         (_s, pr) => { this._hitEmperor(pr._damage || 1); pr.destroy(); }, null, this);
       this._guardTimer = EMPEROR.guardFirstMs;
@@ -2150,14 +2154,19 @@ class GameScene extends Phaser.Scene {
   _createEmperor(x, groundY) {
     // Art occupies y=16..106 of a 128px frame, so anchoring at 106/128
     // stands him on the floor.
-    const sprite = this.physics.add.staticImage(x, groundY, 'golden_emperor')
+    const sprite = this.physics.add.staticImage(x, groundY + EMPEROR.yOffset, 'golden_emperor')
       .setOrigin(0.5, 106 / 128).setScale(SCALE);
     sprite.setFrame(0);
     sprite.refreshBody();
+    // Texture space -> world: the origin puts frame point (64, 106) at the
+    // sprite's position, so texture pixel (tx, ty) lands at
+    // sprite.x + (tx-64)*SCALE, sprite.y + (ty-106)*SCALE.  A static body
+    // won't derive that from an offset, so place it outright.
     sprite.body.setSize(EMPEROR_BODY.w * SCALE, EMPEROR_BODY.h * SCALE);
-    sprite.body.setOffset(
-      sprite.x - sprite.displayWidth / 2 + EMPEROR_BODY.x * SCALE,
-      sprite.y - sprite.displayHeight * (106 / 128) + EMPEROR_BODY.y * SCALE);
+    sprite.body.position.set(
+      sprite.x + (EMPEROR_BODY.x - 64)  * SCALE,
+      sprite.y + (EMPEROR_BODY.y - 106) * SCALE);
+    sprite.body.updateCenter();
     const e = {
       sprite, hp: EMPEROR.hp, maxHp: EMPEROR.hp, dead: false,
       state: 'rest', timer: Phaser.Math.Between(2500, 4000),
@@ -2267,10 +2276,34 @@ class GameScene extends Phaser.Scene {
     const whole = Math.floor(this._surgeAcc);
     if (whole <= 0) return;
     this._surgeAcc -= whole;
+    const hpBefore = this._hp;
     this._hp = Math.max(0, this._hp - whole);
+    // Flash the drained slice purple on the HUD so the drain reads as
+    // the surge's doing rather than generic damage.
+    // Surges drain 1 HP at a time, so flashing each tick alone would be a
+    // 3px sliver.  While contact continues, keep the original anchor so
+    // the purple band grows to cover the whole drain.
+    const now = this.time.now;
+    const drainOngoing = this._surgeFlash && now < this._surgeFlash.until;
+    this._surgeFlash = {
+      from:  drainOngoing ? this._surgeFlash.from : hpBefore,
+      to:    this._hp,
+      until: now + 600,
+    };
     // Lifesteal: what the surge takes, the Emperor regains.
     if (EMPEROR.lifesteal && this.emperor && !this.emperor.dead) {
+      const bossBefore = this.emperor.hp;
       this.emperor.hp = Math.min(this.emperor.maxHp, this.emperor.hp + whole);
+      if (this.emperor.hp > bossBefore) {
+        // Same idea in reverse: the gained slice shows purple, then
+        // settles to gold, so it can't be mistaken for regeneration.
+        const healOngoing = this._bossHealFlash && now < this._bossHealFlash.until;
+        this._bossHealFlash = {
+          from:  healOngoing ? this._bossHealFlash.from : bossBefore,
+          to:    this.emperor.hp,
+          until: now + 600,
+        };
+      }
     }
     const ps = this.player.sprite;
     ps.setTintFill(0x9b4dff);
@@ -4803,6 +4836,8 @@ class HUDScene extends Phaser.Scene {
     const xpY   = panelY + 18;                  // 418
     const hpY   = panelY + 40;                  // 440
     this._BAR_W = BAR_W;
+    this._BAR_X = BAR_X;
+    this._HP_Y  = hpY;
 
     // ── XP bar (blue) ─────────────────────────────
     this.add.rectangle(BAR_X, xpY, BAR_W, BAR_H, 0x222222).setOrigin(0, 0.5);
@@ -4826,6 +4861,11 @@ class HUDScene extends Phaser.Scene {
     this.hpFill = this.add.rectangle(BAR_X, hpY, BAR_W, BAR_H, 0x52a850).setOrigin(0, 0.5);
     this.add.rectangle(BAR_X, hpY, BAR_W, BAR_H)
       .setOrigin(0, 0.5).setStrokeStyle(2, 0x000000).setFillStyle();
+    // Purple slice showing HP a Dark Surge just drained, before it goes.
+    // Built at full width and resized with setSize: a Rectangle created
+    // at width 0 can't be driven by displayWidth (width * scaleX == 0).
+    this.hpGhost = this.add.rectangle(BAR_X, hpY, BAR_W, BAR_H, 0x9b4dff)
+      .setOrigin(0, 0.5).setVisible(false);
     this.hpText = this.add.text(BAR_X + BAR_W / 2, hpY, '100/100', {
       fontSize: '11px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff', stroke: '#000000', strokeThickness: 2,
@@ -4846,11 +4886,17 @@ class HUDScene extends Phaser.Scene {
     this.bossFill = this.add.rectangle(bossX, bossY, BOSS_W, BOSS_H, 0xffd700).setOrigin(0, 0.5);
     const bossEdge = this.add.rectangle(bossX, bossY, BOSS_W, BOSS_H)
       .setOrigin(0, 0.5).setStrokeStyle(3, 0x000000).setFillStyle();
+    // Purple slice showing HP the Emperor just stole, before it turns gold.
+    this.bossGhost = this.add.rectangle(bossX, bossY, BOSS_W, BOSS_H, 0x9b4dff)
+      .setOrigin(0, 0.5).setVisible(false);
+    this._BOSS_X = bossX;
+    this._BOSS_Y = bossY;
     this.bossText = this.add.text(W / 2, bossY, '350 / 350', {
       fontSize: '13px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#3a2a00', stroke: '#ffe98a', strokeThickness: 2,
     }).setOrigin(0.5);
-    this._bossBarObjs = [this.bossLabel, bossBg, this.bossFill, bossEdge, this.bossText];
+    this._bossBarObjs = [this.bossLabel, bossBg, this.bossFill, this.bossGhost,
+                         bossEdge, this.bossText];
     this._bossBarObjs.forEach(o => o.setVisible(false));
 
     // ── Pause button (yellow) — raised so there's air below it ──
@@ -4981,6 +5027,17 @@ class HUDScene extends Phaser.Scene {
     this.hpFill.displayWidth = (gs._hp / gs._maxHp) * this._BAR_W;
     this.hpText.setText(`${gs._hp}/${gs._maxHp}`);
 
+    // Surge drain: purple over the stretch of bar that just emptied.
+    const sf = gs._surgeFlash;
+    if (sf && gs.time.now < sf.until && gs._maxHp > 0) {
+      const x0 = this._BAR_X + (sf.to / gs._maxHp) * this._BAR_W;
+      const w  = ((sf.from - sf.to) / gs._maxHp) * this._BAR_W;
+      this.hpGhost.setPosition(x0, this._HP_Y).setVisible(true);
+      this.hpGhost.setSize(Math.max(2, w), this.hpFill.height);
+    } else {
+      this.hpGhost.setVisible(false);
+    }
+
     // Boss bar — only while a boss is on its feet.
     const boss = gs.emperor;
     const showBoss = !!(boss && !boss.dead && boss.sprite.active);
@@ -4988,6 +5045,17 @@ class HUDScene extends Phaser.Scene {
     if (showBoss) {
       this.bossFill.displayWidth = (boss.hp / boss.maxHp) * this._BOSS_BAR_W;
       this.bossText.setText(`${boss.hp} / ${boss.maxHp}`);
+      // Lifesteal: the slice he just gained shows purple, then settles
+      // to gold when the flash expires.
+      const bf = gs._bossHealFlash;
+      if (bf && gs.time.now < bf.until) {
+        const x0 = this._BOSS_X + (bf.from / boss.maxHp) * this._BOSS_BAR_W;
+        const w  = ((bf.to - bf.from) / boss.maxHp) * this._BOSS_BAR_W;
+        this.bossGhost.setPosition(x0, this._BOSS_Y).setVisible(true);
+        this.bossGhost.setSize(Math.max(2, w), this.bossFill.height);
+      } else {
+        this.bossGhost.setVisible(false);
+      }
     }
 
     // XP bar + level
