@@ -560,7 +560,7 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('player_gold',   0xffd700, 11, 18, 31);
     makeSheet('dummy',         0xcc4444, 2, 27, 25);
     makeSheet('zombie',        0x2f6b2f, 6, 32, 32);
-    makeSheet('zombie_butler', 0x1f4b2f, 5, 32, 32);
+    makeSheet('zombie_butler', 0x1f4b2f, 6, 32, 32);
     makeSheet('golden_guard',  0xe8c33a, 3, 32, 64);
     makeImg  ('lightning_strike', 0x9be3ff, 32, 32);
     makeSheet('gold_door',        0xe8c33a, 2, 18, 25);
@@ -2592,10 +2592,14 @@ class GameScene extends Phaser.Scene {
     add('zombie_knockback', 'zombie', 5, 5, 4, 0);
     // Butler sheet is the same layout without the duplicate walk frame,
     // so its wind-up and knockback sit one index earlier.
-    add('butler_idle',      'zombie_butler', 0, 0, 4);
-    add('butler_walk',      'zombie_butler', 1, 2, 9);
-    add('butler_windup',    'zombie_butler', 3, 3, 4, 0);
-    add('butler_knockback', 'zombie_butler', 4, 4, 4, 0);
+    // Frame 0 is the burrow-up pose (used when the Emperor summons them
+    // out of the floor), so every other frame sits one later than on the
+    // original 5-frame sheet.
+    add('butler_burrow',    'zombie_butler', 0, 0, 4, 0);
+    add('butler_idle',      'zombie_butler', 1, 1, 4);
+    add('butler_walk',      'zombie_butler', 2, 3, 9);
+    add('butler_windup',    'zombie_butler', 4, 4, 4, 0);
+    add('butler_knockback', 'zombie_butler', 5, 5, 4, 0);
 
     // ── Golden Guard ─────────────────────────────────────────────
     // Walking is a fast alternation between the idle and walk frames.
