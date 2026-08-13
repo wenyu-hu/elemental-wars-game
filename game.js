@@ -1832,7 +1832,7 @@ class GameScene extends Phaser.Scene {
       .setScale(DOOR_SCALE);
     sprite.setFrame(0);
     sprite.refreshBody();
-    return { sprite, opened: false, solving: false };
+    return { sprite, opened: false, solving: false, passed: false };
   }
 
   // Called from checkAttackHit when the player swings at the door.
@@ -1840,9 +1840,11 @@ class GameScene extends Phaser.Scene {
     const d = this.door;
     if (!d || d.opened || d.solving || this._chestSequenceActive) return;
     d.solving = true;
-    // Reaching the door is itself a checkpoint, so a laser death costs
-    // the puzzle attempt rather than the whole gauntlet behind it.
-    this._setCheckpoint(this.player.sprite.x, this.player.sprite.y);
+    // Deliberately NOT a checkpoint.  Checkpointing here would make a
+    // laser death free — the gauntlet is already cleared, so the player
+    // would respawn at the door and retry instantly, which is exactly
+    // the brute-force the damage exists to prevent.  The checkpoint is
+    // awarded for going THROUGH the door instead.
     this._openDoorPuzzle();
   }
 
@@ -1970,6 +1972,18 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  // The checkpoint is earned by passing through the open door, not by
+  // reaching it — so a laser death rewinds to whatever came before and
+  // actually costs the player something.
+  _updateDoor() {
+    const d = this.door;
+    if (!d || !d.opened || d.passed || !this.player) return;
+    if (this.player.sprite.x > d.sprite.x + 20) {
+      d.passed = true;
+      this._setCheckpoint(this.player.sprite.x, this.player.sprite.y);
+    }
+  }
+
   _flashDoorMessage(text, color) {
     const t = this.add.text(this.scale.width / 2, this.scale.height / 2, text, {
       fontSize: '54px', fontFamily: '"Arial Black", Arial, sans-serif',
@@ -1990,6 +2004,8 @@ class GameScene extends Phaser.Scene {
       this.door.solving = false;
       this.door.sprite.setFrame(1);          // swing it ajar
       this.door.sprite.refreshBody();
+      // An open door has to be walkable, or solving it changes nothing.
+      this.door.sprite.body.enable = false;
       this.cameras.main.shake(160, 0.005);
     });
   }
@@ -2928,6 +2944,7 @@ class GameScene extends Phaser.Scene {
     this._updateLevel2(delta);
     this._updateZombies(delta);
     this._updateGuards(delta);
+    this._updateDoor();
     this._updateLightning();
   }
 
