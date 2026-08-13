@@ -114,6 +114,46 @@ const GUARD = {
 const GUARD_BODY = { x: 10, y: 10, w: 17, h: 44 };
 
 // ─────────────────────────────────────────────
+//  Golden Emperor (boss room)
+// ─────────────────────────────────────────────
+// Stationary on the right, immune to knockback so he can't be combo
+// locked — the trade for that is a long rest between casts, giving the
+// player room to deal with the peons.
+//
+// Beam cast: he marks where the player IS, and 0.5s later a surge erupts
+// there.  Each surge lives 2s but a new one starts every 1.25s, so two
+// overlap — running in a straight line is safe, doubling back is not.
+// Damage taken from surges is returned to him as health, so sloppy
+// dodging visibly extends the fight.
+const EMPEROR = {
+  hp: 350,
+  restMinMs: 10000,     // gap between casts
+  restMaxMs: 15000,
+  windupMs: 600,        // scepter raised before the first surge
+
+  beamCount: 5,
+  beamDps: 5,
+  beamLifeMs: 2000,
+  beamIntervalMs: 1250, // < lifeMs, so two are live at once
+  beamWarnMs: 500,      // from marking the spot to eruption
+  beamW: 96,
+  beamH: 240,
+  lifesteal: true,
+
+  summonEvery: 3,       // every 3rd cast summons instead of beaming
+  summonCount: 5,
+  burrowMs: 700,        // butlers claw up before they can act
+
+  guardFirstMs: 2000,   // first guard shortly after the fight starts
+  guardEveryMs: 45000,
+  guardMaxAlive: 3,
+};
+// Body box in unscaled texture px.  The art is 53x90 at x=47..100, but
+// the raised scepter reaches left in the attack frames, so the box
+// covers the throne and body only.
+const EMPEROR_BODY = { x: 60, y: 16, w: 40, h: 90 };
+
+// ─────────────────────────────────────────────
 //  Golden Door puzzle
 // ─────────────────────────────────────────────
 // Deduce the order of the four elements from three clues.  Generated
@@ -493,6 +533,11 @@ class PreloadScene extends Phaser.Scene {
     // closed door's base sits 22/25 of the way down the frame.
     this.load.spritesheet('gold_door', 'assets/Gold Door.png', { frameWidth: 18, frameHeight: 25 });
     this.load.image('laser_bolt',      'assets/Laser Bolt.png');
+    // Boss room.  The Emperor is enthroned in a 128x128 frame; Dark Surge
+    // is already drawn at its final on-screen size (96x240), so unlike
+    // every other sprite here it renders at scale 1 rather than x3.
+    this.load.spritesheet('golden_emperor', 'assets/enemies/Golden Emperor.png', { frameWidth: 128, frameHeight: 128 });
+    this.load.spritesheet('dark_surge',     'assets/Dark Surge.png',             { frameWidth: 96,  frameHeight: 240 });
     this.load.spritesheet('zombie_butler', 'assets/enemies/Butler Zombie.png', { frameWidth: 32, frameHeight: 32 });
     this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 14, frameHeight: 16 });
     this.load.image('item_wooden_sword',  'assets/items/Sword.png');
@@ -565,6 +610,8 @@ class PreloadScene extends Phaser.Scene {
     makeImg  ('lightning_strike', 0x9be3ff, 32, 32);
     makeSheet('gold_door',        0xe8c33a, 2, 18, 25);
     makeImg  ('laser_bolt',       0xff4444, 19,  9);
+    makeSheet('golden_emperor',   0xe8c33a, 4, 128, 128);
+    makeSheet('dark_surge',       0x8b2fd6, 2,  96, 240);
     makeSheet('chest',         0xcc9922, 2, 14, 16);
     makeImg  ('ground',        0x4a9944, 32, 32);
     makeImg  ('dirt',          0x3d2008, 32, 32);
@@ -801,6 +848,10 @@ class GameScene extends Phaser.Scene {
     this.zombies = null;           // EX-level zombies
     this.guards  = null;           // EX-level golden guards
     this.lightningBolts = null;    // falling Golden Guard strikes
+    this.emperor = null;           // boss-room Golden Emperor
+    this.surges  = null;           // his Dark Surge geysers
+    this._guardTimer = 0;
+    this._surgeAcc = 0;
     this.door = null;              // EX-level Golden Door
     this._doorLockout = false;     // frozen while the door's bolt is in flight
     this._doorBolt = null;
@@ -1021,6 +1072,20 @@ class GameScene extends Phaser.Scene {
     // restored, since that snapshot is the one to keep.
     if (this._hardCheckpoints && !this._checkpoint) {
       this._setCheckpoint(this._respawnX, this._respawnY);
+    }
+
+    if (this._levelNum === 'exboss') {
+      this.zombies = [];
+      this.guards  = [];
+      this.surges  = this.physics.add.group({ allowGravity: false });
+      this.lightningBolts = this.physics.add.group({ allowGravity: false });
+      this.physics.add.overlap(this.player.sprite, this.lightningBolts,
+        (_p, bolt) => this._onPlayerHitByLightning(bolt), null, this);
+      this.emperor = this._createEmperor(
+        this.physics.world.bounds.width - 190, groundTop);
+      this.physics.add.overlap(this.emperor.sprite, this.elementProjectiles,
+        (_s, pr) => { this._hitEmperor(pr._damage || 1); pr.destroy(); }, null, this);
+      this._guardTimer = EMPEROR.guardFirstMs;
     }
 
     // ── Camera ───────────────────────────────────────────────────────
@@ -1593,6 +1658,12 @@ class GameScene extends Phaser.Scene {
       if (z.timer    > 0) z.timer    -= delta;
       if (z.cooldown > 0) z.cooldown -= delta;
 
+      // Summoned butlers claw up out of the floor first.
+      if (z.state === 'burrow') {
+        s.body.setVelocityX(0);
+        if (z.timer <= 0) { z.state = 'idle'; s.anims.play(A + '_idle', true); }
+        continue;
+      }
       // Knockback overrides everything until it expires.
       if (z.state === 'knockback') {
         if (z.timer <= 0) {
@@ -2068,6 +2139,219 @@ class GameScene extends Phaser.Scene {
       if (this._doorBolt) { this._doorBolt.destroy(); this._doorBolt = null; }
       this._doorLockout = false;
     });
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  //  Golden Emperor
+  //
+  //  rest -> windup (scepter raised) -> beams | summon -> rest.
+  //  Every `summonEvery`-th cast is a summon instead of beams.
+  // ─────────────────────────────────────────────────────────────────
+  _createEmperor(x, groundY) {
+    // Art occupies y=16..106 of a 128px frame, so anchoring at 106/128
+    // stands him on the floor.
+    const sprite = this.physics.add.staticImage(x, groundY, 'golden_emperor')
+      .setOrigin(0.5, 106 / 128).setScale(SCALE);
+    sprite.setFrame(0);
+    sprite.refreshBody();
+    sprite.body.setSize(EMPEROR_BODY.w * SCALE, EMPEROR_BODY.h * SCALE);
+    sprite.body.setOffset(
+      sprite.x - sprite.displayWidth / 2 + EMPEROR_BODY.x * SCALE,
+      sprite.y - sprite.displayHeight * (106 / 128) + EMPEROR_BODY.y * SCALE);
+    const e = {
+      sprite, hp: EMPEROR.hp, maxHp: EMPEROR.hp, dead: false,
+      state: 'rest', timer: Phaser.Math.Between(2500, 4000),
+      castCount: 0, beamsLeft: 0,
+    };
+    if (this.anims.exists('emperor_idle')) sprite.play?.('emperor_idle');
+    return e;
+  }
+
+  _updateEmperor(delta) {
+    const e = this.emperor;
+    if (!e || e.dead) return;
+    e.timer -= delta;
+
+    if (e.state === 'rest') {
+      if (e.timer <= 0) {
+        e.castCount++;
+        e.state = 'windup';
+        e.timer = EMPEROR.windupMs;
+        e.sprite.setFrame(2);                 // scepter up: the tell
+      }
+      return;
+    }
+
+    if (e.state === 'windup') {
+      // Shimmer between the two crackle frames while charging.
+      e.sprite.setFrame(((this.time.now / 90) | 0) % 2 ? 3 : 2);
+      if (e.timer <= 0) {
+        if (e.castCount % EMPEROR.summonEvery === 0) {
+          this._emperorSummon();
+          this._emperorRest(e);
+        } else {
+          e.state = 'beaming';
+          e.beamsLeft = EMPEROR.beamCount;
+          e.timer = 0;
+        }
+      }
+      return;
+    }
+
+    if (e.state === 'beaming') {
+      e.sprite.setFrame(((this.time.now / 90) | 0) % 2 ? 3 : 2);
+      if (e.timer <= 0) {
+        if (e.beamsLeft > 0) {
+          e.beamsLeft--;
+          this._markSurge();
+          e.timer = EMPEROR.beamIntervalMs;
+        } else {
+          this._emperorRest(e);
+        }
+      }
+    }
+  }
+
+  _emperorRest(e) {
+    e.state = 'rest';
+    e.timer = Phaser.Math.Between(EMPEROR.restMinMs, EMPEROR.restMaxMs);
+    e.sprite.setFrame(0);
+  }
+
+  // Mark the player's current spot, then erupt there after the warning.
+  // The marker is what makes the 0.5s window a warning rather than just
+  // a delayed hit — without it the player has nothing to read.
+  _markSurge() {
+    if (!this.player) return;
+    const x = this.player.sprite.x;
+    const y = this._groundTopY;
+    const mark = this.add.ellipse(x, y, EMPEROR.beamW * 0.9, 18, 0x8b2fd6, 0.55)
+      .setDepth(9);
+    this.tweens.add({ targets: mark, alpha: 0.15, scaleX: 1.15,
+                      duration: EMPEROR.beamWarnMs, ease: 'Sine.easeIn' });
+    this.time.delayedCall(EMPEROR.beamWarnMs, () => {
+      mark.destroy();
+      this._spawnSurge(x, y);
+    });
+  }
+
+  _spawnSurge(x, y) {
+    if (!this.surges) return;
+    const s = this.surges.create(x, y, 'dark_surge');
+    if (!s) return;
+    // Dark Surge is drawn at final size, so scale 1 — not SCALE.
+    s.setOrigin(0.5, 1).setScale(1).setDepth(11);
+    s.play('dark_surge');
+    s.body.setAllowGravity(false);
+    s.body.setSize(EMPEROR.beamW, EMPEROR.beamH);
+    s.body.setOffset(0, 0);
+    this.cameras.main.shake(120, 0.004);
+    this.time.delayedCall(EMPEROR.beamLifeMs, () => { if (s.active) s.destroy(); });
+  }
+
+  // Surges damage over time rather than on contact, so they bypass the
+  // i-frame path used for one-off hits and drain fractionally instead.
+  _updateSurges(delta) {
+    if (!this.surges || !this.player || this._portalReached) return;
+    const pb = this.player.sprite.body;
+    const pr = new Phaser.Geom.Rectangle(pb.left, pb.top, pb.width, pb.height);
+    let touching = false;
+    for (const s of this.surges.getChildren()) {
+      if (!s.active) continue;
+      if (Phaser.Geom.Intersects.RectangleToRectangle(pr, s.getBounds())) {
+        touching = true; break;
+      }
+    }
+    if (!touching) { this._surgeAcc = 0; return; }
+    this._surgeAcc = (this._surgeAcc || 0) + EMPEROR.beamDps * (delta / 1000);
+    const whole = Math.floor(this._surgeAcc);
+    if (whole <= 0) return;
+    this._surgeAcc -= whole;
+    this._hp = Math.max(0, this._hp - whole);
+    // Lifesteal: what the surge takes, the Emperor regains.
+    if (EMPEROR.lifesteal && this.emperor && !this.emperor.dead) {
+      this.emperor.hp = Math.min(this.emperor.maxHp, this.emperor.hp + whole);
+    }
+    const ps = this.player.sprite;
+    ps.setTintFill(0x9b4dff);
+    this.time.delayedCall(70, () => { if (ps.active) ps.clearTint(); });
+    if (this._hp <= 0) this.respawnPlayer();
+  }
+
+  // Five butlers claw up out of the floor, spread across the room.
+  _emperorSummon() {
+    if (!this.zombies) this.zombies = [];
+    const roomW = this.physics.world.bounds.width;
+    const n = EMPEROR.summonCount;
+    for (let i = 0; i < n; i++) {
+      const x = 160 + (roomW - 380) * (i / (n - 1));
+      const z = this._createZombie(x, this._groundTopY - 60, 'butler');
+      z.cpId = 'summon' + (this._summonSeq = (this._summonSeq || 0) + 1);
+      z.state = 'burrow';
+      z.timer = EMPEROR.burrowMs;
+      z.sprite.anims.play('butler_burrow', true);
+      this.physics.add.collider(z.sprite, this.platforms);
+      this.physics.add.collider(this.player.sprite, z.sprite);
+      this.physics.add.overlap(z.sprite, this.elementProjectiles,
+        (_s, pr) => { this._hitZombie(z, pr._damage || 1, pr.x); pr.destroy(); },
+        null, this);
+      this.zombies.push(z);
+    }
+  }
+
+  // One guard at the start, then a fresh one from the left on a long
+  // timer — capped, so falling behind doesn't snowball into a screen of
+  // guards you can't read.
+  _updateBossGuards(delta) {
+    if (!this.guards) return;
+    this._guardTimer -= delta;
+    if (this._guardTimer > 0) return;
+    const alive = this.guards.filter(g => !g.dead && g.sprite.active).length;
+    if (alive >= EMPEROR.guardMaxAlive) return;   // hold at the cap
+    const g = this._createGuard(90, this._groundTopY - 120);
+    g.cpId = 'bossguard' + (this._bossGuardSeq = (this._bossGuardSeq || 0) + 1);
+    this.physics.add.collider(g.sprite, this.platforms);
+    this.physics.add.collider(this.player.sprite, g.sprite);
+    this.physics.add.overlap(g.sprite, this.elementProjectiles,
+      (_s, pr) => { this._hitGuard(g, pr._damage || 1, pr.x); pr.destroy(); },
+      null, this);
+    this.guards.push(g);
+    this._guardTimer = EMPEROR.guardEveryMs;
+  }
+
+  // Knockback-immune by design, so he can't be pinned in a melee combo.
+  _hitEmperor(dmg) {
+    const e = this.emperor;
+    if (!e || e.dead) return;
+    e.hp = Math.max(0, e.hp - dmg);
+    e.sprite.setTintFill(0xffffff);
+    this.time.delayedCall(70, () => { if (!e.dead) e.sprite.clearTint(); });
+    if (e.hp <= 0) this._emperorDefeated();
+  }
+
+  _emperorDefeated() {
+    const e = this.emperor;
+    e.dead = true;
+    if (this.surges) this.surges.clear(true, true);
+    this.cameras.main.shake(500, 0.012);
+    this.tweens.add({ targets: e.sprite, alpha: 0, angle: 12, duration: 900,
+                      ease: 'Power2', onComplete: () => e.sprite.destroy() });
+
+    // The whole point of the EX level: this is the gold skin.
+    this.registry.set('goldSkinUnlocked', true);
+    saveProgress({ goldSkinUnlocked: true });
+
+    const W = this.scale.width, H = this.scale.height;
+    const U = 1 / this.cameras.main.zoom;
+    const mk = (dy, size, text, color) =>
+      this.add.text(W / 2, H / 2 + dy * U, text, {
+        fontSize: `${Math.round(size * U)}px`,
+        fontFamily: '"Arial Black", Arial, sans-serif',
+        color, stroke: '#000000', strokeThickness: 6,
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(1300).setAlpha(0);
+    const a = mk(-30, 34, 'THE EMPEROR FALLS', '#ffd700');
+    const b = mk(10, 18, 'Gold skin unlocked!', '#ffffff');
+    this.tweens.add({ targets: [a, b], alpha: 1, duration: 500, delay: 700 });
   }
 
   _createRangedDummy(x, y) {
@@ -2607,6 +2891,14 @@ class GameScene extends Phaser.Scene {
     add('gg_walk',   'golden_guard', 0, 1, 10);
     add('gg_attack', 'golden_guard', 2, 2, 4, 0);
 
+    // ── Golden Emperor ───────────────────────────────────────────
+    // Frames 0-1 idle and 2-3 attack; each pair differs only in how the
+    // scepter's gem crackles, so both loop as a slow shimmer.  Raising
+    // the scepter (idle -> attack) is the tell.
+    add('emperor_idle',   'golden_emperor', 0, 1, 3);
+    add('emperor_attack', 'golden_emperor', 2, 3, 6);
+    add('dark_surge',     'dark_surge',     0, 1, 10);
+
     add('dummy_idle',   'dummy',         0, 0,  4);
     add('dummy_hit',    'dummy',         1, 1,  4, 0);
     add('chest_closed', 'chest',         0, 0,  4);
@@ -2973,6 +3265,11 @@ class GameScene extends Phaser.Scene {
     this._updateZombies(delta);
     this._updateGuards(delta);
     this._updateDoor();
+    if (this._levelNum === 'exboss') {
+      this._updateEmperor(delta);
+      this._updateSurges(delta);
+      this._updateBossGuards(delta);
+    }
     this._updateLightning();
   }
 
@@ -3563,6 +3860,13 @@ class GameScene extends Phaser.Scene {
 
   checkAttackHit() {
     const ps = this.player.sprite, reach = TS * 1.3;
+    if (this.emperor && !this.emperor.dead) {
+      const es = this.emperor.sprite;
+      const facing = ps.flipX ? es.x > ps.x : es.x < ps.x;
+      if (Math.abs(ps.x - es.x) < reach + 60 && Math.abs(ps.y - es.y) < TS * 2 && facing) {
+        this._hitEmperor(this._meleeDamage());
+      }
+    }
     if (this.door && !this.door.opened) {
       const ds = this.door.sprite;
       const facing = ps.flipX ? ds.x > ps.x : ds.x < ps.x;
