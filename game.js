@@ -126,6 +126,13 @@ const DOOR = {
   boltSpeed: 900,
   slots: 4,
 };
+// The boss room is exactly one screenful — at 0.65 zoom the camera sees
+// 800/0.65 x 480/0.65 world units, so a room that size never scrolls.
+const GAME_ZOOM     = 0.65;
+// Vertical window chosen so the carpet sits ~85% down the view, leaving
+// headroom above for the Emperor.
+const BOSS_ROOM_TOP = 141;
+
 const PUZZLE_EL    = ['fire', 'water', 'air', 'earth'];
 const PUZZLE_LABEL = { fire: 'Fire', water: 'Water', air: 'Air', earth: 'Earth' };
 
@@ -774,7 +781,8 @@ class GameScene extends Phaser.Scene {
     // anniversary level, deliberately kept out of the number sequence so
     // adding a real level 3 later can't collide with it.
     const rawLevel = data && data.level;
-    this._levelNum = (rawLevel === 'ex') ? 'ex' : (Number(rawLevel) || 1);
+    this._levelNum = (rawLevel === 'ex' || rawLevel === 'exboss')
+      ? rawLevel : (Number(rawLevel) || 1);
     this.dummy        = null;
     this.chest        = null;
     this.patrolDummy  = null;
@@ -803,8 +811,9 @@ class GameScene extends Phaser.Scene {
   create() {
     // World width is per-level; height is shared so the camera and
     // floor math stays consistent across tutorials.
-    const WORLD_W   = (this._levelNum === 2)    ? 6336
-                    : (this._levelNum === 'ex') ? 4800
+    const WORLD_W   = (this._levelNum === 2)      ? 6336
+                    : (this._levelNum === 'ex')   ? 4800
+                    : (this._levelNum === 'exboss') ? Math.round(this.scale.width / GAME_ZOOM)
                     : 5800;
     const WORLD_H   = 1200;
     const floorY    = WORLD_H - 4 * TS;       // grass tile centre  y = 816
@@ -860,7 +869,7 @@ class GameScene extends Phaser.Scene {
     this._skin = skinUnlocked(_saved.skin, _saved) ? _saved.skin : 'default';
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H + TS * 2);
-    if (this._levelNum === 'ex') {
+    if (this._levelNum === 'ex' || this._levelNum === 'exboss') {
       this.cameras.main.setBackgroundColor(0x6b5518);
       this._addBackgroundEX(WORLD_W, WORLD_H, floorY);
     } else {
@@ -871,7 +880,7 @@ class GameScene extends Phaser.Scene {
     // Level terrain + spike pits
     this.platforms = this.physics.add.staticGroup();
     this.spikes    = this.physics.add.staticGroup();
-    if (this._levelNum === 'ex') {
+    if (this._levelNum === 'ex' || this._levelNum === 'exboss') {
       this._buildLevelEX(WORLD_W, WORLD_H, floorY);
     } else if (this._levelNum === 2) {
       this._buildLevel2(WORLD_W, WORLD_H, floorY);
@@ -1018,11 +1027,21 @@ class GameScene extends Phaser.Scene {
     // followOffset(0, +181): Phaser subtracts the offset from the target,
     // so +181 lifts the camera focus 181 world-units ABOVE the player,
     // giving ~75% sky / 20% ground on screen (Dadish look).
-    this.cameras.main.setZoom(0.65);
-    this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
-    this.cameras.main.startFollow(this.player.sprite, true, 0.12, 0.10);
-    // +107 lifts camera focus above player so ground occupies ~30% of screen height
-    this.cameras.main.setFollowOffset(0, 107);
+    this.cameras.main.setZoom(GAME_ZOOM);
+    if (this._levelNum === 'exboss') {
+      // Bounds exactly one viewport, so the camera cannot scroll and the
+      // whole arena is on screen at once — no following the player.
+      const viewW = this.scale.width  / GAME_ZOOM;
+      const viewH = this.scale.height / GAME_ZOOM;
+      this.cameras.main.setBounds(0, BOSS_ROOM_TOP, viewW, viewH);
+      this.cameras.main.stopFollow();
+      this.cameras.main.centerOn(viewW / 2, BOSS_ROOM_TOP + viewH / 2);
+    } else {
+      this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
+      this.cameras.main.startFollow(this.player.sprite, true, 0.12, 0.10);
+      // +107 lifts camera focus above player so ground occupies ~30% of screen height
+      this.cameras.main.setFollowOffset(0, 107);
+    }
 
     // Input
     this.keys = this.input.keyboard.addKeys({
@@ -1980,7 +1999,12 @@ class GameScene extends Phaser.Scene {
     if (!d || !d.opened || d.passed || !this.player) return;
     if (this.player.sprite.x > d.sprite.x + 20) {
       d.passed = true;
-      this._setCheckpoint(this.player.sprite.x, this.player.sprite.y);
+      // Through the door is the boss room.  It starts its own checkpoint
+      // on entry, so dying to the Emperor replays the fight rather than
+      // the gauntlet that led here.
+      this.cameras.main.fade(340, 0, 0, 0);
+      this.time.delayedCall(380, () =>
+        this.scene.start('GameScene', { level: 'exboss' }));
     }
   }
 
@@ -2214,7 +2238,7 @@ class GameScene extends Phaser.Scene {
   //  are handed back with them, so dying can't be farmed for loot.
   // ─────────────────────────────────────────────────────────────────
   get _hardCheckpoints() {
-    return this._levelNum === 'ex' ||
+    return this._levelNum === 'ex' || this._levelNum === 'exboss' ||
            (typeof this._levelNum === 'number' && this._levelNum >= 6);
   }
 
