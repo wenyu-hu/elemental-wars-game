@@ -4831,6 +4831,28 @@ class HUDScene extends Phaser.Scene {
       color: '#ffffff', stroke: '#000000', strokeThickness: 2,
     }).setOrigin(0.5);
 
+    // ── Boss health bar ───────────────────────────
+    // Screen-wide across the top, well clear of the player's own bars at
+    // the bottom.  Hidden until a boss is actually alive.
+    const BOSS_W = 620, BOSS_H = 26;
+    const bossX = Math.round((W - BOSS_W) / 2);
+    const bossY = 54;
+    this._BOSS_BAR_W = BOSS_W;
+    this.bossLabel = this.add.text(W / 2, 28, 'Boss: Golden Emperor', {
+      fontSize: '17px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffd700', stroke: '#000000', strokeThickness: 5,
+    }).setOrigin(0.5);
+    const bossBg = this.add.rectangle(bossX, bossY, BOSS_W, BOSS_H, 0x2a0a12).setOrigin(0, 0.5);
+    this.bossFill = this.add.rectangle(bossX, bossY, BOSS_W, BOSS_H, 0xffd700).setOrigin(0, 0.5);
+    const bossEdge = this.add.rectangle(bossX, bossY, BOSS_W, BOSS_H)
+      .setOrigin(0, 0.5).setStrokeStyle(3, 0x000000).setFillStyle();
+    this.bossText = this.add.text(W / 2, bossY, '350 / 350', {
+      fontSize: '13px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#3a2a00', stroke: '#ffe98a', strokeThickness: 2,
+    }).setOrigin(0.5);
+    this._bossBarObjs = [this.bossLabel, bossBg, this.bossFill, bossEdge, this.bossText];
+    this._bossBarObjs.forEach(o => o.setVisible(false));
+
     // ── Pause button (yellow) — raised so there's air below it ──
     const btnY = panelY + 50;   // was 65; 15px higher for bottom padding
     const pb = this.add.rectangle(28, btnY, 36, 36, 0xffd54f)
@@ -4958,6 +4980,15 @@ class HUDScene extends Phaser.Scene {
     // HP bar
     this.hpFill.displayWidth = (gs._hp / gs._maxHp) * this._BAR_W;
     this.hpText.setText(`${gs._hp}/${gs._maxHp}`);
+
+    // Boss bar — only while a boss is on its feet.
+    const boss = gs.emperor;
+    const showBoss = !!(boss && !boss.dead && boss.sprite.active);
+    this._bossBarObjs.forEach(o => o.setVisible(showBoss));
+    if (showBoss) {
+      this.bossFill.displayWidth = (boss.hp / boss.maxHp) * this._BOSS_BAR_W;
+      this.bossText.setText(`${boss.hp} / ${boss.maxHp}`);
+    }
 
     // XP bar + level
     this.xpFill.displayWidth = (gs._xp / gs._xpToNext) * this._BAR_W;
