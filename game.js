@@ -114,6 +114,112 @@ const GUARD = {
 const GUARD_BODY = { x: 10, y: 10, w: 17, h: 44 };
 
 // ─────────────────────────────────────────────
+//  Golden Door puzzle
+// ─────────────────────────────────────────────
+// Deduce the order of the four elements from three clues.  Generated
+// fresh each attempt so the answer can't be shared, and every generated
+// puzzle is checked to have exactly one solution with no redundant
+// clue — otherwise the door would be unsolvable or a clue would be
+// dead weight.
+const DOOR = {
+  damage: 10,          // laser bolt on a wrong answer
+  boltSpeed: 900,
+  slots: 4,
+};
+const PUZZLE_EL    = ['fire', 'water', 'air', 'earth'];
+const PUZZLE_LABEL = { fire: 'Fire', water: 'Water', air: 'Air', earth: 'Earth' };
+
+function _perms(a) {
+  if (a.length <= 1) return [a];
+  const out = [];
+  a.forEach((x, i) => {
+    const rest = a.slice(0, i).concat(a.slice(i + 1));
+    for (const r of _perms(rest)) out.push([x, ...r]);
+  });
+  return out;
+}
+const PUZZLE_PERMS = _perms(PUZZLE_EL);
+
+// Every true statement about `p`, each with a predicate so candidate
+// arrangements can be tested against it.
+function _puzzleClues(p) {
+  const at = e => p.indexOf(e);
+  const L = PUZZLE_LABEL;
+  const out = [];
+  for (const e of PUZZLE_EL) {
+    for (let n = 0; n < 4; n++) {
+      if (at(e) !== n) {
+        out.push({ kind: 'not-slot', text: `${L[e]} is not in slot ${n + 1}`,
+                   test: q => q.indexOf(e) !== n });
+      }
+    }
+    if (at(e) === 0 || at(e) === 3) {
+      out.push({ kind: 'edge', text: `${L[e]} sits at one of the two ends`,
+                 test: q => q.indexOf(e) === 0 || q.indexOf(e) === 3 });
+    } else {
+      out.push({ kind: 'middle', text: `${L[e]} is not at either end`,
+                 test: q => q.indexOf(e) === 1 || q.indexOf(e) === 2 });
+    }
+  }
+  for (const a of PUZZLE_EL) for (const b of PUZZLE_EL) {
+    if (a === b) continue;
+    if (at(a) + 1 === at(b)) {
+      out.push({ kind: 'adjacent', text: `${L[a]} is immediately left of ${L[b]}`,
+                 test: q => q.indexOf(a) + 1 === q.indexOf(b) });
+    }
+    if (at(a) < at(b)) {
+      out.push({ kind: 'order', text: `${L[a]} is somewhere left of ${L[b]}`,
+                 test: q => q.indexOf(a) < q.indexOf(b) });
+    }
+    if (a < b && Math.abs(at(a) - at(b)) === 2) {
+      const mid = PUZZLE_EL.find(e => at(e) === (at(a) + at(b)) / 2);
+      out.push({ kind: 'between',
+                 text: `${L[mid]} sits directly between ${L[a]} and ${L[b]}`,
+                 test: q => Math.abs(q.indexOf(a) - q.indexOf(b)) === 2 &&
+                            q.indexOf(mid) === (q.indexOf(a) + q.indexOf(b)) / 2 });
+    }
+  }
+  return out;
+}
+
+const _puzzleSolutions = trio => PUZZLE_PERMS.filter(q => trio.every(c => c.test(q)));
+
+// Returns { answer, clues } — three clues that pin down exactly one
+// arrangement, none of them removable.
+function generateDoorPuzzle() {
+  const shuffle = arr => {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  };
+  const answer = PUZZLE_PERMS[Math.floor(Math.random() * PUZZLE_PERMS.length)];
+  const pool   = shuffle(_puzzleClues(answer));
+  let fallback = null;
+  for (let i = 0; i < pool.length - 2; i++) {
+    for (let j = i + 1; j < pool.length - 1; j++) {
+      for (let k = j + 1; k < pool.length; k++) {
+        const trio = [pool[i], pool[j], pool[k]];
+        if (_puzzleSolutions(trio).length !== 1) continue;
+        // Each clue must carry weight: drop it and the answer stops
+        // being unique.  Without this the generator pairs "A
+        // immediately left of B" with "A somewhere left of B", which
+        // reads as three clues but gives two.
+        const loadBearing = trio.every((_, idx) =>
+          _puzzleSolutions(trio.filter((_, m) => m !== idx)).length > 1);
+        if (!loadBearing) continue;
+        if (!fallback) fallback = trio;
+        if (new Set(trio.map(c => c.kind)).size === 3) {
+          return { answer, clues: shuffle(trio).map(c => c.text) };
+        }
+      }
+    }
+  }
+  return { answer, clues: shuffle(fallback || pool.slice(0, 3)).map(c => c.text) };
+}
+
+// ─────────────────────────────────────────────
 //  Player skins
 // ─────────────────────────────────────────────
 // Every skin ships the same set of animations, distinguished by suffix
@@ -376,6 +482,10 @@ class PreloadScene extends Phaser.Scene {
     // Golden Guard frames are 32x64 — twice as tall as everything else.
     this.load.spritesheet('golden_guard',  'assets/enemies/Golden Guard.png', { frameWidth: 32, frameHeight: 64 });
     this.load.image('lightning_strike',    'assets/Blue Lightning Strike.png');
+    // Door: frame 0 closed, frame 1 ajar.  Cropped to the art, so the
+    // closed door's base sits 22/25 of the way down the frame.
+    this.load.spritesheet('gold_door', 'assets/Gold Door.png', { frameWidth: 18, frameHeight: 25 });
+    this.load.image('laser_bolt',      'assets/Laser Bolt.png');
     this.load.spritesheet('zombie_butler', 'assets/enemies/Butler Zombie.png', { frameWidth: 32, frameHeight: 32 });
     this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 14, frameHeight: 16 });
     this.load.image('item_wooden_sword',  'assets/items/Sword.png');
@@ -446,6 +556,8 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('zombie_butler', 0x1f4b2f, 5, 32, 32);
     makeSheet('golden_guard',  0xe8c33a, 3, 32, 64);
     makeImg  ('lightning_strike', 0x9be3ff, 32, 32);
+    makeSheet('gold_door',        0xe8c33a, 2, 18, 25);
+    makeImg  ('laser_bolt',       0xff4444, 19,  9);
     makeSheet('chest',         0xcc9922, 2, 14, 16);
     makeImg  ('ground',        0x4a9944, 32, 32);
     makeImg  ('dirt',          0x3d2008, 32, 32);
@@ -681,6 +793,9 @@ class GameScene extends Phaser.Scene {
     this.zombies = null;           // EX-level zombies
     this.guards  = null;           // EX-level golden guards
     this.lightningBolts = null;    // falling Golden Guard strikes
+    this.door = null;              // EX-level Golden Door
+    this._doorLockout = false;     // frozen while the door's bolt is in flight
+    this._doorBolt = null;
     this._checkpoint = null;       // last world snapshot (hard-checkpoint levels)
     this._pendingCheckpoint = (data && data.checkpoint) || null;
   }
@@ -871,6 +986,9 @@ class GameScene extends Phaser.Scene {
       this.physics.add.overlap(
         this.player.sprite, this.lightningBolts,
         (_p, bolt) => this._onPlayerHitByLightning(bolt), null, this);
+
+      this.door = this._createDoor(4500, groundTop);
+      this.physics.add.collider(this.player.sprite, this.door.sprite);
 
       // Stationed inside the swarm, near its far end, so the third wave
       // is the one that forces you to dodge bolts while surrounded.
@@ -1696,6 +1814,220 @@ class GameScene extends Phaser.Scene {
     g.state = 'knockback';
     g.timer = GUARD.knockbackMs;
     s.body.setVelocityX((Math.sign(s.x - fromX) || 1) * GUARD.knockbackVx);
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  //  Golden Door
+  //
+  //  Attack it to open the puzzle.  Solve it and the door swings ajar;
+  //  get it wrong and it fires a bolt that pins the player in place for
+  //  the hit.  Scaled x6 rather than the usual x3 so the opening reads
+  //  as something the player could actually walk through — at x3 the
+  //  door would be 66px tall against a 93px player.
+  // ─────────────────────────────────────────────────────────────────
+  _createDoor(x, groundY) {
+    const DOOR_SCALE = 6;
+    const sprite = this.physics.add.staticImage(x, groundY, 'gold_door')
+      .setOrigin(0.5, 22 / 25)      // closed door's base, so it stands on the floor
+      .setScale(DOOR_SCALE);
+    sprite.setFrame(0);
+    sprite.refreshBody();
+    return { sprite, opened: false, solving: false };
+  }
+
+  // Called from checkAttackHit when the player swings at the door.
+  _strikeDoor() {
+    const d = this.door;
+    if (!d || d.opened || d.solving || this._chestSequenceActive) return;
+    d.solving = true;
+    // Reaching the door is itself a checkpoint, so a laser death costs
+    // the puzzle attempt rather than the whole gauntlet behind it.
+    this._setCheckpoint(this.player.sprite.x, this.player.sprite.y);
+    this._openDoorPuzzle();
+  }
+
+  _openDoorPuzzle() {
+    const W = this.scale.width, H = this.scale.height;
+    const cam = this.cameras.main;
+    // The camera is zoomed to 0.65, and scrollFactor-0 objects are still
+    // zoomed with it — so screen-space UI has to be drawn 1/zoom larger
+    // to come out at its intended size.  Canvas coords map to local as
+    // local = (canvas - centre) / zoom + centre.
+    const U  = 1 / cam.zoom;
+    const CX = W / 2, CY = H / 2;
+    const at = (dx, dy) => [CX + dx * U, CY + dy * U];   // canvas offset -> local
+    const fs = px => `${Math.round(px * U)}px`;
+    const FONT = '"Arial Black", Arial, sans-serif';
+    const D = 1200;
+
+    const layer = [];
+    const add = o => { o.setScrollFactor(0).setDepth(D); layer.push(o); return o; };
+    const cleanup = () => layer.forEach(o => o.destroy());
+
+    this._chestSequenceActive = true;               // freezes player input
+    const puzzle = generateDoorPuzzle();
+
+    const dim = add(this.add.rectangle(CX, CY, W * U, H * U, 0x000000, 0));
+    this.tweens.add({ targets: dim, fillAlpha: 0.78, duration: 240 });
+
+    // ── Top: how to play ─────────────────────────────────────────
+    add(this.add.text(...at(0, -196), 'THE GOLDEN SEAL', {
+      fontSize: fs(21), fontFamily: FONT,
+      color: '#ffd700', stroke: '#000000', strokeThickness: 5,
+    }).setOrigin(0.5));
+    add(this.add.text(...at(0, -168),
+      'Four elements, one per slot.  Drag the tiles in, then submit.', {
+      fontSize: fs(13), fontFamily: FONT,
+      color: '#ffffff', stroke: '#000000', strokeThickness: 4,
+    }).setOrigin(0.5));
+
+    // ── Top-middle: the clues ────────────────────────────────────
+    puzzle.clues.forEach((c, i) => {
+      add(this.add.text(...at(0, -126 + i * 26), c, {
+        fontSize: fs(14), fontFamily: FONT,
+        color: '#ffe9a8', stroke: '#000000', strokeThickness: 4,
+      }).setOrigin(0.5));
+    });
+
+    // ── Bottom-middle: the four slots ────────────────────────────
+    const SLOT = 54, GAP = 14;
+    const rowW = 4 * SLOT + 3 * GAP;
+    const slots = [];
+    for (let i = 0; i < DOOR.slots; i++) {
+      const dx = -rowW / 2 + SLOT / 2 + i * (SLOT + GAP);
+      const [lx, ly] = at(dx, -6);
+      const box = add(this.add.rectangle(lx, ly, SLOT * U, SLOT * U, 0x24242c)
+        .setStrokeStyle(3 * U, 0xffd700));
+      add(this.add.text(...at(dx, -6 + SLOT / 2 + 13), `${i + 1}`, {
+        fontSize: fs(11), fontFamily: FONT, color: '#c9a227',
+      }).setOrigin(0.5));
+      slots.push({ x: lx, y: ly, box, held: null });
+    }
+
+    // ── Bottom: the draggable element tiles ──────────────────────
+    const tiles = [];
+    const snapRadius = SLOT * U;
+    PUZZLE_EL.forEach((el, i) => {
+      const dx = -rowW / 2 + SLOT / 2 + i * (SLOT + GAP);
+      const [lx, ly] = at(dx, 92);
+      add(this.add.rectangle(lx, ly, SLOT * U, SLOT * U, 0x3a3a44)
+        .setStrokeStyle(2 * U, 0x8a8a99));
+      const icon = add(this.add.sprite(lx, ly, ELEMENT_DEFS[el].icon, 0).setScale(1.7 * U));
+      icon.play(ELEMENT_DEFS[el].icon);
+      icon.setInteractive({ useHandCursor: true, draggable: true });
+      this.input.setDraggable(icon);
+      const t = { el, icon, homeX: lx, homeY: ly, slot: null };
+      const home = () => {
+        if (t.slot !== null && slots[t.slot].held === t) slots[t.slot].held = null;
+        t.slot = null; icon.x = t.homeX; icon.y = t.homeY;
+      };
+      icon.on('dragstart', () => icon.setDepth(D + 2));
+      icon.on('drag', (pointer) => {
+        // pointer is in canvas space; convert into this layer's space.
+        icon.x = (pointer.x - CX) * U + CX;
+        icon.y = (pointer.y - CY) * U + CY;
+      });
+      icon.on('dragend', () => {
+        icon.setDepth(D);
+        let best = null, bestD = Infinity;
+        slots.forEach((s, si) => {
+          const d = Phaser.Math.Distance.Between(icon.x, icon.y, s.x, s.y);
+          if (d < bestD) { bestD = d; best = si; }
+        });
+        if (best === null || bestD > snapRadius) { home(); return; }
+        const target = slots[best];
+        if (target.held && target.held !== t) {
+          const other = target.held;
+          other.slot = null; other.icon.x = other.homeX; other.icon.y = other.homeY;
+        }
+        if (t.slot !== null && slots[t.slot].held === t) slots[t.slot].held = null;
+        t.slot = best; target.held = t;
+        icon.x = target.x; icon.y = target.y;
+      });
+      tiles.push(t);
+    });
+
+    // ── Very bottom: submit ──────────────────────────────────────
+    // Kept above canvas y~400, where the HUD's XP/HP bars start.
+    const [bx, by] = at(0, 140);
+    const btn = add(this.add.text(bx, by, '  SUBMIT  ', {
+      fontSize: fs(18), fontFamily: FONT,
+      color: '#3a2a00', backgroundColor: '#ffd700',
+      padding: { x: Math.round(18 * U), y: Math.round(8 * U) },
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true }));
+    btn.on('pointerover', () => btn.setStyle({ backgroundColor: '#ffe870' }));
+    btn.on('pointerout',  () => btn.setStyle({ backgroundColor: '#ffd700' }));
+    btn.on('pointerup', () => {
+      const guess = slots.map(s => (s.held ? s.held.el : null));
+      if (guess.some(g => g === null)) {
+        this._flashDoorMessage('Fill every slot!', '#ffd700');
+        return;
+      }
+      tiles.forEach(t => t.icon.disableInteractive());
+      btn.disableInteractive();
+      if (guess.every((g, i) => g === puzzle.answer[i])) this._doorSolved(cleanup);
+      else                                              this._doorFailed(cleanup);
+    });
+  }
+
+  _flashDoorMessage(text, color) {
+    const t = this.add.text(this.scale.width / 2, this.scale.height / 2, text, {
+      fontSize: '54px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color, stroke: '#000000', strokeThickness: 8,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(1400).setScale(0.6);
+    this.tweens.add({ targets: t, scale: 1, duration: 220, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: t, alpha: 0, duration: 380, delay: 620,
+                      onComplete: () => t.destroy() });
+    return t;
+  }
+
+  _doorSolved(cleanup) {
+    this._flashDoorMessage('Correct!', '#7CFC64');
+    this.time.delayedCall(900, () => {
+      cleanup();
+      this._chestSequenceActive = false;
+      this.door.opened = true;
+      this.door.solving = false;
+      this.door.sprite.setFrame(1);          // swing it ajar
+      this.door.sprite.refreshBody();
+      this.cameras.main.shake(160, 0.005);
+    });
+  }
+
+  // Wrong answer: back to the world with the player pinned in place,
+  // the door fires, the hit lands, then control returns.
+  _doorFailed(cleanup) {
+    this._flashDoorMessage('Wrong!', '#ff4444');
+    this.time.delayedCall(700, () => {
+      cleanup();
+      this.door.solving = false;
+      this._doorLockout = true;              // player frozen, input ignored
+      this._chestSequenceActive = false;
+      this._fireDoorBolt();
+    });
+  }
+
+  _fireDoorBolt() {
+    const ps = this.player.sprite, ds = this.door.sprite;
+    const dir = Math.sign(ps.x - ds.x) || -1;
+    const bolt = this.physics.add.image(ds.x + dir * 30, ps.y, 'laser_bolt')
+      .setScale(SCALE).setDepth(14);
+    bolt.body.setAllowGravity(false);
+    bolt.setFlipX(dir < 0);
+    bolt.body.setVelocityX(dir * DOOR.boltSpeed);
+    this._doorBolt = bolt;
+    this.physics.add.overlap(ps, bolt, () => {
+      if (!bolt.active) return;
+      bolt.destroy();
+      this._doorBolt = null;
+      this._damagePlayer(DOOR.damage);
+      this.time.delayedCall(260, () => { this._doorLockout = false; });
+    });
+    // Safety net: if it somehow misses, don't strand the player.
+    this.time.delayedCall(1500, () => {
+      if (this._doorBolt) { this._doorBolt.destroy(); this._doorBolt = null; }
+      this._doorLockout = false;
+    });
   }
 
   _createRangedDummy(x, y) {
@@ -2948,6 +3280,13 @@ class GameScene extends Phaser.Scene {
 
   updatePlayer(delta) {
     const p = this.player, s = p.sprite, bod = s.body, k = this.keys;
+    // Pinned in place while the door's bolt is in flight — the player
+    // watches it land rather than dodging it.
+    if (this._doorLockout) {
+      bod.setVelocityX(0);
+      s.anims.play(this._animKey('idle'), true);
+      return;
+    }
     // Portal reached — input is locked while the level-complete
     // sequence plays (player + portal shrink, then MapScene).
     if (this._portalReached) return;
@@ -3179,6 +3518,13 @@ class GameScene extends Phaser.Scene {
 
   checkAttackHit() {
     const ps = this.player.sprite, reach = TS * 1.3;
+    if (this.door && !this.door.opened) {
+      const ds = this.door.sprite;
+      const facing = ps.flipX ? ds.x > ps.x : ds.x < ps.x;
+      if (Math.abs(ps.x - ds.x) < reach + 40 && Math.abs(ps.y - ds.y) < TS * 2 && facing) {
+        this._strikeDoor();
+      }
+    }
     if (this.guards) {
       for (const g of this.guards) {
         if (g.dead || !g.sprite.active) continue;
