@@ -142,7 +142,8 @@ const EMPEROR = {
 
   summonEvery: 3,       // every 3rd cast summons instead of beaming
   summonCount: 5,
-  burrowMs: 700,        // butlers claw up before they can act
+  burrowMs: 1600,       // long enough to see them coming and back off
+  burrowSink: 35,       // how far into the floor they sit while emerging
 
   yOffset: 20,          // sits this far below the floor line
 
@@ -1662,10 +1663,27 @@ class GameScene extends Phaser.Scene {
       if (z.timer    > 0) z.timer    -= delta;
       if (z.cooldown > 0) z.cooldown -= delta;
 
-      // Summoned butlers claw up out of the floor first.
+      // Summoned butlers claw up out of the floor first.  Once they've
+      // landed, sink them so only the top half shows, and park the body
+      // — they're underground, so nothing collides with them until they
+      // finish surfacing.
       if (z.state === 'burrow') {
         s.body.setVelocityX(0);
-        if (z.timer <= 0) { z.state = 'idle'; s.anims.play(A + '_idle', true); }
+        if (!z.burrowSunk && s.body.blocked.down) {
+          z.restY = s.y;
+          s.body.enable = false;
+          s.y = z.restY + EMPEROR.burrowSink;
+          z.burrowSunk = true;
+        }
+        if (z.timer <= 0) {
+          if (z.restY != null) {
+            s.y = z.restY;
+            s.body.enable = true;
+            s.body.reset(s.x, z.restY);   // resync after the parked stretch
+          }
+          z.state = 'idle';
+          s.anims.play(A + '_idle', true);
+        }
         continue;
       }
       // Knockback overrides everything until it expires.
