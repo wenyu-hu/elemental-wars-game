@@ -168,6 +168,11 @@ const EMPEROR = {
 // the raised scepter reaches left in the attack frames, so the box
 // covers the throne and body only.
 const EMPEROR_BODY = { x: 60, y: 16, w: 40, h: 90 };
+// Just the throne block, in the same texture space.  Columns 47-56 are
+// the scepter shaft and 57-67 the outstretched arm; the solid seat runs
+// 68-100.  The spike row spans this rather than the collision body, or
+// it juts out over the staff.
+const EMPEROR_THRONE = { x: 68, w: 32 };
 
 // ─────────────────────────────────────────────
 //  Golden Door puzzle
@@ -2306,11 +2311,15 @@ class GameScene extends Phaser.Scene {
   // simply hold the opposite direction and win the tug of war.  Spikes
   // aren't something input can argue with.
   _buildThroneSpikes() {
-    const eb = this.emperor.sprite.body;
-    const SW = 8 * SCALE;
-    const y  = eb.top - SW / 2;
+    const sp0 = this.emperor.sprite;
+    const eb  = sp0.body;
+    const SW  = 8 * SCALE;
+    const y   = eb.top - SW / 2;
+    // Texture space -> world, matching how the body was placed.
+    const left  = sp0.x + (EMPEROR_THRONE.x - 64) * SCALE;
+    const right = left + EMPEROR_THRONE.w * SCALE;
     this._throneSpikes = [];
-    for (let x = eb.left + SW / 2; x < eb.right; x += SW) {
+    for (let x = left + SW / 2; x < right; x += SW) {
       const sp = this.spikes.create(x, y, 'spike').setScale(SCALE);
       sp.body.setSize(6, 6).setOffset(1, 0);
       sp.refreshBody();
