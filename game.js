@@ -877,6 +877,7 @@ class GameScene extends Phaser.Scene {
     this.door = null;              // EX-level Golden Door
     this._doorLockout = false;     // frozen while the door's bolt is in flight
     this._doorBolt = null;
+    this._bossOver = false;        // true once the Emperor falls
     this._checkpoint = null;       // last world snapshot (hard-checkpoint levels)
     this._pendingCheckpoint = (data && data.checkpoint) || null;
   }
@@ -2477,7 +2478,7 @@ class GameScene extends Phaser.Scene {
   // timer — capped, so falling behind doesn't snowball into a screen of
   // guards you can't read.
   _updateBossGuards(delta) {
-    if (!this.guards) return;
+    if (!this.guards || this._bossOver) return;
     this._guardTimer -= delta;
     if (this._guardTimer > 0) return;
     const alive = this.guards.filter(g => !g.dead && g.sprite.active).length;
@@ -2503,10 +2504,32 @@ class GameScene extends Phaser.Scene {
     if (e.hp <= 0) this._emperorDefeated();
   }
 
+  // Everything he was commanding falls with him, and nothing else
+  // arrives — otherwise the player is left mopping up peons after the
+  // fight is already decided.
+  _routMinions() {
+    this._bossOver = true;
+    const rout = [...(this.zombies || []), ...(this.guards || [])]
+      .filter(m => !m.dead && m.sprite && m.sprite.active);
+    rout.forEach((m, i) => {
+      m.dead = true;
+      if (m.sprite.body) m.sprite.body.setVelocityX(0);
+      // Slight stagger so they drop in a wave rather than all at once.
+      this.tweens.add({
+        targets: m.sprite, angle: 90, alpha: 0,
+        duration: 380, delay: i * 60, ease: 'Power2',
+        onComplete: () => m.sprite.destroy(),
+      });
+    });
+    if (this.lightningBolts) this.lightningBolts.clear(true, true);
+    return rout.length;
+  }
+
   _emperorDefeated() {
     const e = this.emperor;
     e.dead = true;
     if (this.surges) this.surges.clear(true, true);
+    this._routMinions();
     this.cameras.main.shake(500, 0.012);
     this.tweens.add({ targets: e.sprite, alpha: 0, angle: 12, duration: 900,
                       ease: 'Power2', onComplete: () => e.sprite.destroy() });
