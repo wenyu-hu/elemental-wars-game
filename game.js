@@ -2295,6 +2295,24 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  // The throne is ~250px tall and a surge only 240, so its top sits just
+  // above every geyser — and the peons can't jump, so the player is out
+  // of reach of the entire fight up there.  Slide them off the moment
+  // they land on it.  Runs after updatePlayer, so this beats the
+  // player's own input for that frame.
+  _preventThroneCamping() {
+    const e = this.emperor;
+    if (!e || e.dead || !this.player) return;
+    const ps = this.player.sprite, pb = ps.body, eb = e.sprite.body;
+    const onTop = pb.velocity.y >= 0
+               && Math.abs(pb.bottom - eb.top) < 12
+               && pb.right > eb.left && pb.left < eb.right;
+    if (!onTop) return;
+    // Arcade StaticBody has no centerX — derive it from left/width.
+    const mid = eb.left + eb.width / 2;
+    pb.setVelocityX((ps.x < mid ? -1 : 1) * 300);
+  }
+
   _emperorRest(e) {
     e.state = 'rest';
     e.timer = Phaser.Math.Between(EMPEROR.restMinMs, EMPEROR.restMaxMs);
@@ -3374,6 +3392,7 @@ class GameScene extends Phaser.Scene {
     this._updateDoor();
     if (this._levelNum === 'exboss') {
       this._updateEmperor(delta);
+      this._preventThroneCamping();
       this._updateSurges(delta);
       this._updateBossGuards(delta);
     }
