@@ -120,9 +120,9 @@ const GUARD_BODY = { x: 10, y: 10, w: 17, h: 44 };
 // drop all three — or nothing.  Drops lie where the butler fell and are
 // picked up by walking over them.
 const FOOD_DROPS = [
-  { id: 'apple',  chance: 0.50, color: 0xe23b3b },
-  { id: 'orange', chance: 0.35, color: 0xef8a1b },
-  { id: 'banana', chance: 0.20, color: 0xf2d13b },
+  { id: 'apple',  chance: 0.50, tex: 'food_apple'  },
+  { id: 'orange', chance: 0.35, tex: 'food_orange' },
+  { id: 'banana', chance: 0.20, tex: 'food_banana' },
 ];
 
 // ─────────────────────────────────────────────
@@ -554,6 +554,9 @@ class PreloadScene extends Phaser.Scene {
     // closed door's base sits 22/25 of the way down the frame.
     this.load.spritesheet('gold_door', 'assets/Gold Door.png', { frameWidth: 18, frameHeight: 25 });
     this.load.image('laser_bolt',      'assets/Laser Bolt.png');
+    this.load.image('food_apple',      'assets/food/Apple.png');
+    this.load.image('food_orange',     'assets/food/Orange.png');
+    this.load.image('food_banana',     'assets/food/Banana.png');
     // Boss room.  The Emperor is enthroned in a 128x128 frame; Dark Surge
     // is already drawn at its final on-screen size (96x240), so unlike
     // every other sprite here it renders at scale 1 rather than x3.
@@ -631,6 +634,9 @@ class PreloadScene extends Phaser.Scene {
     makeImg  ('lightning_strike', 0x9be3ff, 32, 32);
     makeSheet('gold_door',        0xe8c33a, 2, 18, 25);
     makeImg  ('laser_bolt',       0xff4444, 19,  9);
+    makeImg  ('food_apple',       0xe23b3b, 32, 32);
+    makeImg  ('food_orange',      0xef8a1b, 32, 32);
+    makeImg  ('food_banana',      0xf2d13b, 32, 32);
     makeSheet('golden_emperor',   0xe8c33a, 4, 128, 128);
     makeSheet('dark_surge',       0x8b2fd6, 2,  96, 240);
     makeSheet('chest',         0xcc9922, 2, 14, 16);
@@ -1780,18 +1786,39 @@ class GameScene extends Phaser.Scene {
     won.forEach((f, i) => {
       // Fan multiple drops out so they don't stack invisibly.
       const dx = won.length === 1 ? 0 : (i - (won.length - 1) / 2) * 34;
-      const d = this.foodDrops.create(x + dx, y - 20, '__WHITE');
+      const d = this.foodDrops.create(x + dx, y - 20, f.tex);
       if (!d) return;
       d._foodId = f.id;
-      d.setDisplaySize(20, 20).setTint(f.color).setDepth(9);
+      d.setScale(SCALE * 0.7).setDepth(9);
+      // Box the body to the fruit rather than the 32x32 frame, so the
+      // pickup triggers where it looks like it should.
+      this._fitBodyToTexture(d);
       d.body.setAllowGravity(true);
       d.body.setBounce(0.35);
       d.body.setDragX(140);
       d.body.setVelocity(Phaser.Math.Between(-40, 40), -140);
       this.physics.add.collider(d, this.platforms);
-      this.tweens.add({ targets: d, scaleX: d.scaleX * 1.15, scaleY: d.scaleY * 1.15,
-                        duration: 420, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      // The idle bob starts only once it has landed — see
+      // _updateFoodDrops.  Tweening y while gravity is still pulling
+      // makes the two fight and the fruit judder in place.
     });
+  }
+
+  // Let each drop fall and bounce naturally, then park it and start the
+  // gentle float.  Doing this on landing rather than at spawn keeps the
+  // tween from fighting gravity.
+  _updateFoodDrops() {
+    if (!this.foodDrops) return;
+    for (const d of this.foodDrops.getChildren()) {
+      if (!d.active || d._settled) continue;
+      if (d.body.blocked.down && Math.abs(d.body.velocity.y) < 12) {
+        d._settled = true;
+        d.body.setAllowGravity(false);
+        d.body.setVelocity(0, 0);
+        this.tweens.add({ targets: d, y: d.y - 6, duration: 640,
+                          yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      }
+    }
   }
 
   _collectFood(drop) {
@@ -3460,6 +3487,7 @@ class GameScene extends Phaser.Scene {
     this._updateElements(delta);
     this._updateLevel2(delta);
     this._updateZombies(delta);
+    this._updateFoodDrops();
     this._updateGuards(delta);
     this._updateDoor();
     if (this._levelNum === 'exboss') {

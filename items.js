@@ -149,18 +149,16 @@
   // ── Food ─────────────────────────────────────
   // Dropped by butler zombies.  Stackable and eaten from the inventory;
   // `heal` is restored to the player on eating.
-  // iconSrc is left blank until the pixel art lands — the inventory
-  // falls back to the item name, and the world drop to a placeholder.
   defineItem({
-    id: 'apple',  name: 'Apple',  iconSrc: '', type: 'food', rarity: '',
+    id: 'apple',  name: 'Apple',  iconSrc: 'assets/food/Apple.png', type: 'food', rarity: '',
     stats: { heal: 5,  effect: '', duration: 0 },
   });
   defineItem({
-    id: 'orange', name: 'Orange', iconSrc: '', type: 'food', rarity: '',
+    id: 'orange', name: 'Orange', iconSrc: 'assets/food/Orange.png', type: 'food', rarity: '',
     stats: { heal: 10, effect: '', duration: 0 },
   });
   defineItem({
-    id: 'banana', name: 'Banana', iconSrc: '', type: 'food', rarity: '',
+    id: 'banana', name: 'Banana', iconSrc: 'assets/food/Banana.png', type: 'food', rarity: '',
     stats: { heal: 15, effect: '', duration: 0 },
   });
 
