@@ -120,9 +120,9 @@ const GUARD_BODY = { x: 10, y: 10, w: 17, h: 44 };
 // drop all three — or nothing.  Drops lie where the butler fell and are
 // picked up by walking over them.
 const FOOD_DROPS = [
-  { id: 'apple',  chance: 0.70, color: 0xe23b3b },
-  { id: 'orange', chance: 0.55, color: 0xef8a1b },
-  { id: 'banana', chance: 0.40, color: 0xf2d13b },
+  { id: 'apple',  chance: 0.50, color: 0xe23b3b },
+  { id: 'orange', chance: 0.35, color: 0xef8a1b },
+  { id: 'banana', chance: 0.20, color: 0xf2d13b },
 ];
 
 // ─────────────────────────────────────────────
