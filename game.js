@@ -158,6 +158,7 @@ const EMPEROR = {
   burrowSink: 35,       // how far into the floor they sit while emerging
 
   yOffset: 20,          // sits this far below the floor line
+  throneSpikeDelayMs: 350,  // grace before the seat turns hostile
 
   guardFirstMs: 2000,   // first guard shortly after the fight starts
   guardEveryMs: 45000,
@@ -1105,6 +1106,7 @@ class GameScene extends Phaser.Scene {
         this.physics.world.bounds.width - 190, groundTop);
       // He's a wall, not a ghost — the player can't walk through the throne.
       this.physics.add.collider(this.player.sprite, this.emperor.sprite);
+      this._buildThroneSpikes();
       this.physics.add.overlap(this.emperor.sprite, this.elementProjectiles,
         (_s, pr) => { this._hitEmperor(pr._damage || 1); pr.destroy(); }, null, this);
       this._guardTimer = EMPEROR.guardFirstMs;
@@ -2296,21 +2298,59 @@ class GameScene extends Phaser.Scene {
   }
 
   // The throne is ~250px tall and a surge only 240, so its top sits just
-  // above every geyser — and the peons can't jump, so the player is out
-  // of reach of the entire fight up there.  Slide them off the moment
-  // they land on it.  Runs after updatePlayer, so this beats the
-  // player's own input for that frame.
-  _preventThroneCamping() {
+  // above every geyser — and since the peons can't jump, a player stood
+  // up there is out of reach of the whole fight.  Linger on it and
+  // spikes rise out of the seat; step off and they sink away again.
+  //
+  // A shove was tried first and was the wrong tool: the player could
+  // simply hold the opposite direction and win the tug of war.  Spikes
+  // aren't something input can argue with.
+  _buildThroneSpikes() {
+    const eb = this.emperor.sprite.body;
+    const SW = 8 * SCALE;
+    const y  = eb.top - SW / 2;
+    this._throneSpikes = [];
+    for (let x = eb.left + SW / 2; x < eb.right; x += SW) {
+      const sp = this.spikes.create(x, y, 'spike').setScale(SCALE);
+      sp.body.setSize(6, 6).setOffset(1, 0);
+      sp.refreshBody();
+      sp.setVisible(false);
+      sp.body.enable = false;
+      this._throneSpikes.push(sp);
+    }
+    this._throneSpikesUp = false;
+    this._throneDwell = 0;
+  }
+
+  _updateThroneSpikes(delta) {
     const e = this.emperor;
-    if (!e || e.dead || !this.player) return;
-    const ps = this.player.sprite, pb = ps.body, eb = e.sprite.body;
-    const onTop = pb.velocity.y >= 0
-               && Math.abs(pb.bottom - eb.top) < 12
+    if (!e || e.dead || !this._throneSpikes || !this.player) return;
+    const pb = this.player.sprite.body, eb = e.sprite.body;
+    const onTop = Math.abs(pb.bottom - eb.top) < 14
                && pb.right > eb.left && pb.left < eb.right;
-    if (!onTop) return;
-    // Arcade StaticBody has no centerX — derive it from left/width.
-    const mid = eb.left + eb.width / 2;
-    pb.setVelocityX((ps.x < mid ? -1 : 1) * 300);
+
+    if (onTop) {
+      this._throneDwell += delta;
+      if (!this._throneSpikesUp && this._throneDwell >= EMPEROR.throneSpikeDelayMs) {
+        this._throneSpikesUp = true;
+        for (const sp of this._throneSpikes) {
+          sp.setVisible(true).setScale(SCALE, 0);
+          sp.body.enable = true;
+          this.tweens.add({ targets: sp, scaleY: SCALE, duration: 110, ease: 'Back.easeOut' });
+        }
+      }
+      return;
+    }
+
+    this._throneDwell = 0;
+    if (this._throneSpikesUp) {
+      this._throneSpikesUp = false;
+      for (const sp of this._throneSpikes) {
+        sp.body.enable = false;
+        this.tweens.add({ targets: sp, scaleY: 0, duration: 120,
+                          onComplete: () => sp.setVisible(false) });
+      }
+    }
   }
 
   _emperorRest(e) {
@@ -3392,7 +3432,7 @@ class GameScene extends Phaser.Scene {
     this._updateDoor();
     if (this._levelNum === 'exboss') {
       this._updateEmperor(delta);
-      this._preventThroneCamping();
+      this._updateThroneSpikes(delta);
       this._updateSurges(delta);
       this._updateBossGuards(delta);
     }
