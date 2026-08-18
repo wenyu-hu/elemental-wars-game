@@ -127,6 +127,25 @@ const FOOD_DROPS = [
 ];
 
 // ─────────────────────────────────────────────
+//  Status effects
+// ─────────────────────────────────────────────
+// Frame indices into the shared effect-icon sheet.  Only `burning` is
+// implemented so far; the rest are drawn from the same sheet the moment
+// their mechanic lands, so nothing needs re-wiring then.
+const EFFECT_ICON_FRAME = { burning: 0, poisoned: 1, frozen: 2, stunned: 3 };
+
+// Reads whichever status flags an enemy is carrying.  Kept in one place
+// so adding a status means touching this and the sheet, nothing else.
+function activeStatuses(e) {
+  const out = [];
+  if (e.burn)    out.push('burning');
+  if (e.poison)  out.push('poisoned');
+  if (e.frozen)  out.push('frozen');
+  if (e.stunned) out.push('stunned');
+  return out;
+}
+
+// ─────────────────────────────────────────────
 //  EX level availability
 // ─────────────────────────────────────────────
 // The anniversary bonus level runs as a post-event: it appears on the
@@ -600,6 +619,8 @@ class PreloadScene extends Phaser.Scene {
     // closed door's base sits 22/25 of the way down the frame.
     this.load.spritesheet('gold_door', 'assets/Gold Door.png', { frameWidth: 18, frameHeight: 25 });
     this.load.image('laser_bolt',      'assets/Laser Bolt.png');
+    // Status badges: 0 on fire, 1 poisoned, 2 frozen, 3 stunned.
+    this.load.spritesheet('effect_icons', 'assets/Effect Icons.png', { frameWidth: 32, frameHeight: 32 });
     this.load.image('food_apple',      'assets/food/Apple.png');
     this.load.image('food_orange',     'assets/food/Orange.png');
     this.load.image('food_banana',     'assets/food/Banana.png');
@@ -680,6 +701,7 @@ class PreloadScene extends Phaser.Scene {
     makeImg  ('lightning_strike', 0x9be3ff, 32, 32);
     makeSheet('gold_door',        0xe8c33a, 2, 18, 25);
     makeImg  ('laser_bolt',       0xff4444, 19,  9);
+    makeSheet('effect_icons',     0xff6a1f, 4, 32, 32);
     makeImg  ('food_apple',       0xe23b3b, 32, 32);
     makeImg  ('food_orange',      0xef8a1b, 32, 32);
     makeImg  ('food_banana',      0xf2d13b, 32, 32);
@@ -2788,25 +2810,32 @@ class GameScene extends Phaser.Scene {
     for (const z of this.zombies || [])  tick(z, n => this._hitZombie(z, n, z.sprite.x, { dot: true }));
     for (const g of this.guards  || [])  tick(g, n => this._hitGuard(g,  n, g.sprite.x, { dot: true }));
     if (this.emperor) tick(this.emperor, n => this._hitEmperor(n, { dot: true }));
-    this._updateBurnIcons();
+    this._updateStatusIcons();
   }
 
   // Ranged dummies show their flame beside a healthbar; everything else
-  // has no bar, so the marker floats above the sprite instead.
-  _updateBurnIcons() {
+  // has no bar, so badges sit in a row above the sprite.  Several can be
+  // active at once, so they lay out side by side rather than stacking.
+  _updateStatusIcons() {
+    const BADGE = 22, GAP = 3;
     const mark = (e) => {
       if (!e || !e.sprite) return;
-      const lit = !!e.burn && !e.dead && e.sprite.active;
-      if (lit) {
-        if (!e.burnIcon) {
-          e.burnIcon = this.add.image(0, 0, 'icon_fire', 0).setScale(2).setDepth(16);
-        }
-        e.burnIcon.setVisible(true).setPosition(
-          e.sprite.x, e.sprite.y - e.sprite.displayHeight / 2 - 12);
-      } else if (e.burnIcon) {
-        e.burnIcon.destroy();
-        e.burnIcon = null;
+      const live = !e.dead && e.sprite.active;
+      const keys = live ? activeStatuses(e) : [];
+      e.statusIcons = e.statusIcons || [];
+      // Grow or shrink the badge row to match what's actually active.
+      while (e.statusIcons.length > keys.length) e.statusIcons.pop().destroy();
+      while (e.statusIcons.length < keys.length) {
+        e.statusIcons.push(this.add.image(0, 0, 'effect_icons', 0)
+          .setDisplaySize(BADGE, BADGE).setDepth(16));
       }
+      const rowW = keys.length * BADGE + (keys.length - 1) * GAP;
+      const top  = e.sprite.y - e.sprite.displayHeight / 2 - 14;
+      keys.forEach((k, i) => {
+        e.statusIcons[i]
+          .setFrame(EFFECT_ICON_FRAME[k])
+          .setPosition(e.sprite.x - rowW / 2 + BADGE / 2 + i * (BADGE + GAP), top);
+      });
     };
     (this.zombies || []).forEach(mark);
     (this.guards  || []).forEach(mark);
