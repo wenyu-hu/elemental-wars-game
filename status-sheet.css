@@ -86,7 +86,11 @@
   margin-bottom: 16px;
   gap: 16px;
 }
-#ew-status-overlay .header-right { text-align: right; }
+/* The close button is absolutely positioned at the card's top-right
+   (right:14px, 32px wide), so reserve that strip — otherwise right-
+   aligned header content slides under it.  Most visible with no
+   username set, when "Lv. N" rises to the first line. */
+#ew-status-overlay .header-right { text-align: right; padding-right: 52px; }
 #ew-status-overlay .username-display {
   font-size: 1.5rem; font-weight: 700; color: var(--text-primary);
 }
