@@ -104,6 +104,7 @@ const GUARD = {
   strikeLingerMs: 110,     // brief flash on impact, then gone
   knockbackMs: 280,
   knockbackVx: 45,
+  knockbackResist: 0.5,   // armoured: shoves land at half strength
   idleTurnMinMs: 5000,
   idleTurnMaxMs: 8000,
 };
@@ -1195,7 +1196,8 @@ class GameScene extends Phaser.Scene {
         this.physics.add.collider(z.sprite, this.platforms);
         this.physics.add.collider(this.player.sprite, z.sprite);
         this.physics.add.overlap(z.sprite, this.elementProjectiles,
-          (_s, pr) => { this._hitZombie(z, pr._damage || 1, pr.x); pr.destroy(); },
+          (_s, pr) => { this._hitZombie(z, pr._damage || 1, pr.x,
+            { knockback: pr._knockback || 0, burn: pr._burn }); pr.destroy(); },
           null, this);
       });
 
@@ -1215,7 +1217,8 @@ class GameScene extends Phaser.Scene {
         this.physics.add.collider(g.sprite, this.platforms);
         this.physics.add.collider(this.player.sprite, g.sprite);
         this.physics.add.overlap(g.sprite, this.elementProjectiles,
-          (_s, pr) => { this._hitGuard(g, pr._damage || 1, pr.x); pr.destroy(); },
+          (_s, pr) => { this._hitGuard(g, pr._damage || 1, pr.x,
+            { knockback: pr._knockback || 0, burn: pr._burn }); pr.destroy(); },
           null, this);
       });
     }
@@ -1244,7 +1247,7 @@ class GameScene extends Phaser.Scene {
       this.physics.add.collider(this.player.sprite, this.emperor.sprite);
       this._buildThroneSpikes();
       this.physics.add.overlap(this.emperor.sprite, this.elementProjectiles,
-        (_s, pr) => { this._hitEmperor(pr._damage || 1); pr.destroy(); }, null, this);
+        (_s, pr) => { this._hitEmperor(pr._damage || 1, { burn: pr._burn }); pr.destroy(); }, null, this);
       this._guardTimer = EMPEROR.guardFirstMs;
     }
 
@@ -1963,7 +1966,11 @@ class GameScene extends Phaser.Scene {
 
   // Damage a zombie and knock it away from `fromX`.  The knockback frame
   // is already drawn red, so no hit-flash tint is layered on top.
-  _hitZombie(z, dmg, fromX) {
+  // opts.knockback  element knockback, overriding the melee default
+  // opts.burn       burn definition to apply
+  // opts.dot        damage only — no stagger, so burn ticks don't
+  //                 permanently interrupt whatever it was doing
+  _hitZombie(z, dmg, fromX, opts = {}) {
     if (!z || z.dead) return;
     const s = z.sprite, cfg = z.cfg;
     z.hp = Math.max(0, z.hp - dmg);
@@ -1978,10 +1985,15 @@ class GameScene extends Phaser.Scene {
       });
       return;
     }
+    if (opts.burn) this._applyBurn(z, opts.burn);
+    if (opts.dot) return;
     z.state = 'knockback';
     z.timer = cfg.knockbackMs;
     s.anims.play(cfg.anim + '_knockback', true);
-    s.body.setVelocityX((Math.sign(s.x - fromX) || 1) * cfg.knockbackVx);
+    // Elements push by their own value — 0 for fire and earth, which
+    // still stagger but don't shove.
+    const kb = opts.knockback != null ? opts.knockback : cfg.knockbackVx;
+    s.body.setVelocityX((Math.sign(s.x - fromX) || 1) * kb);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -2123,7 +2135,7 @@ class GameScene extends Phaser.Scene {
     bolt.destroy();
   }
 
-  _hitGuard(g, dmg, fromX) {
+  _hitGuard(g, dmg, fromX, opts = {}) {
     if (!g || g.dead) return;
     const s = g.sprite;
     g.hp = Math.max(0, g.hp - dmg);
@@ -2136,11 +2148,15 @@ class GameScene extends Phaser.Scene {
       });
       return;
     }
+    if (opts.burn) this._applyBurn(g, opts.burn);
+    if (opts.dot) return;
     s.setTintFill(0xffffff);
     this.time.delayedCall(80, () => { if (!g.dead) s.clearTint(); });
     g.state = 'knockback';
     g.timer = GUARD.knockbackMs;
-    s.body.setVelocityX((Math.sign(s.x - fromX) || 1) * GUARD.knockbackVx);
+    // Armour blunts every shove, melee or elemental, by half.
+    const base = opts.knockback != null ? opts.knockback : GUARD.knockbackVx;
+    s.body.setVelocityX((Math.sign(s.x - fromX) || 1) * base * (1 - GUARD.knockbackResist));
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -2619,7 +2635,8 @@ class GameScene extends Phaser.Scene {
       this.physics.add.collider(z.sprite, this.platforms);
       this.physics.add.collider(this.player.sprite, z.sprite);
       this.physics.add.overlap(z.sprite, this.elementProjectiles,
-        (_s, pr) => { this._hitZombie(z, pr._damage || 1, pr.x); pr.destroy(); },
+        (_s, pr) => { this._hitZombie(z, pr._damage || 1, pr.x,
+            { knockback: pr._knockback || 0, burn: pr._burn }); pr.destroy(); },
         null, this);
       this.zombies.push(z);
     }
@@ -2639,16 +2656,20 @@ class GameScene extends Phaser.Scene {
     this.physics.add.collider(g.sprite, this.platforms);
     this.physics.add.collider(this.player.sprite, g.sprite);
     this.physics.add.overlap(g.sprite, this.elementProjectiles,
-      (_s, pr) => { this._hitGuard(g, pr._damage || 1, pr.x); pr.destroy(); },
+      (_s, pr) => { this._hitGuard(g, pr._damage || 1, pr.x,
+            { knockback: pr._knockback || 0, burn: pr._burn }); pr.destroy(); },
       null, this);
     this.guards.push(g);
     this._guardTimer = EMPEROR.guardEveryMs;
   }
 
   // Knockback-immune by design, so he can't be pinned in a melee combo.
-  _hitEmperor(dmg) {
+  _hitEmperor(dmg, opts = {}) {
     const e = this.emperor;
     if (!e || e.dead) return;
+    // Burns like anything else; knockback is ignored by design so he
+    // can't be pinned in a combo.
+    if (opts.burn) this._applyBurn(e, opts.burn);
     e.hp = Math.max(0, e.hp - dmg);
     e.sprite.setTintFill(0xffffff);
     this.time.delayedCall(70, () => { if (!e.dead) e.sprite.clearTint(); });
@@ -2744,18 +2765,52 @@ class GameScene extends Phaser.Scene {
   }
 
   // Tick fire burn DOT on ranged dummies: 1 dmg/sec for a few seconds.
+  // Refreshes rather than stacks, so spamming fire re-arms the burn
+  // instead of compounding it.
+  _applyBurn(e, burnDef) {
+    if (!e || e.dead || !burnDef) return;
+    e.burn = { ticksLeft: burnDef.ticks, dmgPerTick: burnDef.dmgPerTick,
+               tickMs: burnDef.tickMs, msLeft: burnDef.tickMs };
+  }
+
+  // Ticks burn on every kind of enemy, not just the level-2 dummies.
   _updateBurns(delta) {
-    if (!this.rangedDummies) return;
-    for (const rd of this.rangedDummies) {
-      if (rd.dead || !rd.burn) continue;
-      rd.burn.msLeft -= delta;
-      if (rd.burn.msLeft <= 0) {
-        this._damageRangedDummy(rd, rd.burn.dmgPerTick);
-        rd.burn.ticksLeft -= 1;
-        if (rd.burn.ticksLeft > 0 && !rd.dead) rd.burn.msLeft += rd.burn.tickMs;
-        else rd.burn = null;
+    const tick = (e, hit) => {
+      if (!e || e.dead || !e.burn) return;
+      e.burn.msLeft -= delta;
+      if (e.burn.msLeft > 0) return;
+      hit(e.burn.dmgPerTick);
+      e.burn.ticksLeft -= 1;
+      if (e.burn.ticksLeft > 0 && !e.dead) e.burn.msLeft += e.burn.tickMs;
+      else e.burn = null;
+    };
+    for (const rd of this.rangedDummies || []) tick(rd, n => this._damageRangedDummy(rd, n));
+    for (const z of this.zombies || [])  tick(z, n => this._hitZombie(z, n, z.sprite.x, { dot: true }));
+    for (const g of this.guards  || [])  tick(g, n => this._hitGuard(g,  n, g.sprite.x, { dot: true }));
+    if (this.emperor) tick(this.emperor, n => this._hitEmperor(n, { dot: true }));
+    this._updateBurnIcons();
+  }
+
+  // Ranged dummies show their flame beside a healthbar; everything else
+  // has no bar, so the marker floats above the sprite instead.
+  _updateBurnIcons() {
+    const mark = (e) => {
+      if (!e || !e.sprite) return;
+      const lit = !!e.burn && !e.dead && e.sprite.active;
+      if (lit) {
+        if (!e.burnIcon) {
+          e.burnIcon = this.add.image(0, 0, 'icon_fire', 0).setScale(2).setDepth(16);
+        }
+        e.burnIcon.setVisible(true).setPosition(
+          e.sprite.x, e.sprite.y - e.sprite.displayHeight / 2 - 12);
+      } else if (e.burnIcon) {
+        e.burnIcon.destroy();
+        e.burnIcon = null;
       }
-    }
+    };
+    (this.zombies || []).forEach(mark);
+    (this.guards  || []).forEach(mark);
+    if (this.emperor) mark(this.emperor);
   }
 
   // Apply damage to a ranged dummy and kill it if HP hits 0. Shared by
@@ -3643,12 +3698,12 @@ class GameScene extends Phaser.Scene {
         else if (pr._dir < 0 && pr.x < pr._maxX) pr.destroy();
       });
     }
+    this._updateBurns(delta);
   }
 
   _updateLevel2(delta) {
     if (this._levelNum !== 2) return;
     this._updateRangedBars();
-    this._updateBurns(delta);
 
     // ── Ranged dummies: shoot a fireball every ~3s ────────────────
     if (this.rangedDummies) {
