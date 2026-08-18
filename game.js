@@ -5361,10 +5361,31 @@ class HUDScene extends Phaser.Scene {
     // (Empty for now — per spec, irrelevant until status effects are added.)
 
     // ── PAUSED overlay (hidden by default) ────────
-    this.pausedText = this.add.text(W / 2, H / 2, 'PAUSED', {
+    this.pausedText = this.add.text(W / 2, H / 2 - 40, 'PAUSED', {
       fontSize: '48px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff', stroke: '#000000', strokeThickness: 6,
     }).setOrigin(0.5).setVisible(false);
+
+    // Exit back to the map.  Only reachable while paused, so it can't be
+    // hit mid-fight by accident.
+    this.exitBtn = this.add.text(W / 2, H / 2 + 30, '  EXIT TO MAP  ', {
+      fontSize: '20px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', backgroundColor: '#c0392b', padding: { x: 18, y: 9 },
+    }).setOrigin(0.5).setVisible(false).setInteractive({ useHandCursor: true });
+    this.exitBtn.on('pointerover', () => this.exitBtn.setStyle({ backgroundColor: '#e04b39' }));
+    this.exitBtn.on('pointerout',  () => this.exitBtn.setStyle({ backgroundColor: '#c0392b' }));
+    this.exitBtn.on('pointerup',   () => this._exitToMap());
+  }
+
+  // Leaving mid-level: unpause first so the world isn't left frozen for
+  // the next run, then hand off to the map.  GameScene's shutdown stops
+  // this HUD scene.
+  _exitToMap() {
+    const gs = this._gs;
+    if (gs) {
+      if (gs._paused) gs.togglePause();
+      gs.scene.start('MapScene');
+    }
   }
 
   _togglePause() {
@@ -5372,6 +5393,7 @@ class HUDScene extends Phaser.Scene {
     const paused = this._gs._paused;
     this.pauseIcon.setText(paused ? '▶' : '⏸');
     this.pausedText.setVisible(paused);
+    this.exitBtn.setVisible(paused);
   }
 
   _openStatusSheet() {
@@ -5458,6 +5480,7 @@ class HUDScene extends Phaser.Scene {
     if (paused && this.pauseIcon.text !== '▶') this.pauseIcon.setText('▶');
     if (!paused && this.pauseIcon.text !== '⏸') this.pauseIcon.setText('⏸');
     this.pausedText.setVisible(paused);
+    this.exitBtn.setVisible(paused);
 
     // Hotbar: icon + darken/reload-bar overlay per slot
     if (gs._hotbar) {
