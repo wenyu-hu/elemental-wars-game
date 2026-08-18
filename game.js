@@ -126,6 +126,21 @@ const FOOD_DROPS = [
 ];
 
 // ─────────────────────────────────────────────
+//  EX level availability
+// ─────────────────────────────────────────────
+// The anniversary bonus level runs as a post-event: it appears on the
+// map from Aug 31 to Sep 30, 2026 inclusive, and is hidden otherwise.
+// The 'X' shortcut on the map bypasses this entirely so the level stays
+// testable year-round.
+const EX_WINDOW_START = new Date(2026, 7, 31);              // Aug 31
+const EX_WINDOW_END   = new Date(2026, 8, 30, 23, 59, 59);  // Sep 30, end of day
+
+function isExWindow(now) {
+  const t = now || new Date();
+  return t >= EX_WINDOW_START && t <= EX_WINDOW_END;
+}
+
+// ─────────────────────────────────────────────
 //  Golden Emperor (boss room)
 // ─────────────────────────────────────────────
 // Stationary on the right, immune to knockback so he can't be combo
@@ -4905,6 +4920,11 @@ class MapScene extends Phaser.Scene {
       this._node(p.x, p.y, n, unlocked, done, star);
     });
 
+    // ── EX node ───────────────────────────────────────────────────
+    // Off in the corner, away from the numbered path, and only present
+    // during the event window.
+    if (isExWindow()) this._exNode(720, 400);
+
     // ── Back button ───────────────────────────────────────────────
     const back = this.add.text(20, 20, '◀  Menu', {
       fontSize: '15px', fontFamily: '"Arial Black", Arial, sans-serif',
@@ -4921,7 +4941,8 @@ class MapScene extends Phaser.Scene {
     if (lvl1Done) {
       this.input.keyboard.once('keydown-TWO', () => this.scene.start('GameScene', { level: 2 }));
     }
-    // Temporary way into the EX level while its map node doesn't exist yet.
+    // Always available, in or out of the event window, so the level can
+    // be tested at any time.
     this.input.keyboard.once('keydown-X', () => this.scene.start('GameScene', { level: 'ex' }));
   }
 
@@ -4942,6 +4963,37 @@ class MapScene extends Phaser.Scene {
       }
       d += seg; on = !on;
     }
+  }
+
+  // The anniversary node: gold rather than the numbered path's blue, and
+  // labelled EX so it reads as outside the normal progression.  Open to
+  // everyone — no completion gate — since it's an event level.
+  _exNode(x, y) {
+    const R = 33;
+    const done = this.registry.get('goldSkinUnlocked') || false;
+
+    const gfx = this.add.graphics({ x, y });
+    gfx.fillStyle(0x000000, 0.18).fillCircle(4, 6, R);
+    gfx.fillStyle(done ? 0xf5c518 : 0xfff4cc, 1).fillCircle(0, 0, R);
+    gfx.lineStyle(5, 0xd4a800, 1).strokeCircle(0, 0, R);       // gold, not blue
+
+    const lbl = this.add.text(x, y, 'EX', {
+      fontSize: '24px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#7a5000',
+    }).setOrigin(0.5);
+    lbl.setInteractive(new Phaser.Geom.Rectangle(-R, -R, R * 2, R * 2),
+                       Phaser.Geom.Rectangle.Contains);
+    lbl.input.cursor = 'pointer';
+    lbl.on('pointerover', () =>
+      this.tweens.add({ targets: [gfx, lbl], scaleX: 1.12, scaleY: 1.12, duration: 110, ease: 'Back.easeOut' }));
+    lbl.on('pointerout', () =>
+      this.tweens.add({ targets: [gfx, lbl], scaleX: 1, scaleY: 1, duration: 110 }));
+    lbl.on('pointerup', () => this.scene.start('GameScene', { level: 'ex' }));
+
+    this.add.text(x, y + R + 16, 'Anniversary', {
+      fontSize: '11px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', stroke: '#7a5000', strokeThickness: 4,
+    }).setOrigin(0.5);
   }
 
   _node(x, y, n, unlocked, done, hasStar) {
