@@ -21,7 +21,7 @@ const TS    = TILE * SCALE;   // 96px display per tile
 // over floors (see _wireProjectileObstacles) instead of flying at chest
 // height — that's what makes the water shot look like a wave.
 const ELEMENT_DEFS = {
-  fire:  { icon: 'icon_fire',  damage: 5, range: 10, reload: 3000, speed: 380, scale: 1.2, burst: [0xffd28a, 0xffa640, 0xff6a1f, 0xd83c10], burn: { ticks: 3, dmgPerTick: 1, tickMs: 1000 } },
+  fire:  { icon: 'icon_fire',  damage: 3, range: 10, reload: 3000, speed: 380, scale: 1.2, burst: [0xffd28a, 0xffa640, 0xff6a1f, 0xd83c10], burn: { ticks: 3, dmgPerTick: 1, tickMs: 1000 } },
   water: { icon: 'icon_water', damage: 2, range: 8,  reload: 2000, speed: 420, scale: 1.2, burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd], hugsGround: true, knockback: 260 },
   // Air's art is only 8x8 inside its 32x32 frame.  scale 2.4 makes the
   // cropped hitbox 8*3*2.4 = 57.6px — the same size the old uncropped
