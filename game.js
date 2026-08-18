@@ -5379,23 +5379,34 @@ class HUDScene extends Phaser.Scene {
     const gs = this._gs;
     const wasPaused = gs && gs._paused;
     if (gs && !wasPaused) gs.togglePause();
+
+    // Open FIRST.  open() runs loadFromProgress(), which resets state to
+    // defaults (hp 0/0) before restoring saved data — so anything pushed
+    // in beforehand is wiped.  Pushing afterwards is what makes the
+    // mirrored HP survive; setStat re-renders while the sheet is open.
+    window.statusSheet.open({
+      onClose: () => {
+        // Eating heals inside the sheet, but GameScene owns the live HP —
+        // read it back so food actually restores health in play.
+        // Guarded on a sane max: a sheet that failed to load reports
+        // 0/0, and writing that back would silently zero the player.
+        if (gs && window.statusSheet.getState) {
+          const hp  = window.statusSheet.getState().hp || {};
+          const cur = Number(hp.current), max = Number(hp.max);
+          if (Number.isFinite(cur) && max > 0) {
+            gs._hp = Phaser.Math.Clamp(cur, 0, gs._maxHp);
+          }
+        }
+        if (gs && !wasPaused) gs.togglePause();
+      },
+    });
+
     // Mirror in-game HP into the sheet so the bar reflects current state.
     if (gs && window.statusSheet.setStat) {
       window.statusSheet.setStat('hp.current', gs._hp);
       window.statusSheet.setStat('hp.max',     gs._maxHp);
       window.statusSheet.setStat('level',      gs._level);
     }
-    window.statusSheet.open({
-      onClose: () => {
-        // Eating heals inside the sheet, but GameScene owns the live HP —
-        // read it back so food actually restores health in play.
-        if (gs && window.statusSheet.getState) {
-          const cur = Number(window.statusSheet.getState().hp.current);
-          if (Number.isFinite(cur)) gs._hp = Phaser.Math.Clamp(cur, 0, gs._maxHp);
-        }
-        if (gs && !wasPaused) gs.togglePause();
-      },
-    });
   }
 
   update() {
