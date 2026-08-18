@@ -140,6 +140,22 @@ function isExWindow(now) {
   return t >= EX_WINDOW_START && t <= EX_WINDOW_END;
 }
 
+// Before the window the node shows locked with an opening date, so the
+// event is visibly coming rather than appearing from nowhere.  After it
+// closes the node disappears entirely.
+function exWindowPhase(now) {
+  const t = now || new Date();
+  if (t < EX_WINDOW_START) return 'upcoming';
+  if (t <= EX_WINDOW_END)  return 'open';
+  return 'over';
+}
+
+function exOpensLabel() {
+  const months = ['Jan','Feb','Mar','Apr','May','Jun',
+                  'Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `Opens ${months[EX_WINDOW_START.getMonth()]} ${EX_WINDOW_START.getDate()}`;
+}
+
 // ─────────────────────────────────────────────
 //  Golden Emperor (boss room)
 // ─────────────────────────────────────────────
@@ -4921,9 +4937,10 @@ class MapScene extends Phaser.Scene {
     });
 
     // ── EX node ───────────────────────────────────────────────────
-    // Off in the corner, away from the numbered path, and only present
-    // during the event window.
-    if (isExWindow()) this._exNode(720, 400);
+    // Off in the corner, away from the numbered path.  Locked with an
+    // opening date beforehand, playable during the window, gone after.
+    const exPhase = exWindowPhase();
+    if (exPhase !== 'over') this._exNode(720, 400, exPhase);
 
     // ── Back button ───────────────────────────────────────────────
     const back = this.add.text(20, 20, '◀  Menu', {
@@ -4968,31 +4985,41 @@ class MapScene extends Phaser.Scene {
   // The anniversary node: gold rather than the numbered path's blue, and
   // labelled EX so it reads as outside the normal progression.  Open to
   // everyone — no completion gate — since it's an event level.
-  _exNode(x, y) {
+  _exNode(x, y, phase) {
     const R = 33;
+    const open = phase === 'open';
     const done = this.registry.get('goldSkinUnlocked') || false;
 
     const gfx = this.add.graphics({ x, y });
     gfx.fillStyle(0x000000, 0.18).fillCircle(4, 6, R);
-    gfx.fillStyle(done ? 0xf5c518 : 0xfff4cc, 1).fillCircle(0, 0, R);
-    gfx.lineStyle(5, 0xd4a800, 1).strokeCircle(0, 0, R);       // gold, not blue
+    // Muted while it's still upcoming, full gold once it's playable.
+    gfx.fillStyle(!open ? 0xe6dcc0 : (done ? 0xf5c518 : 0xfff4cc), 1).fillCircle(0, 0, R);
+    gfx.lineStyle(5, open ? 0xd4a800 : 0xb0a070, 1).strokeCircle(0, 0, R);
 
     const lbl = this.add.text(x, y, 'EX', {
       fontSize: '24px', fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#7a5000',
+      color: open ? '#7a5000' : '#8d8163',
     }).setOrigin(0.5);
-    lbl.setInteractive(new Phaser.Geom.Rectangle(-R, -R, R * 2, R * 2),
-                       Phaser.Geom.Rectangle.Contains);
-    lbl.input.cursor = 'pointer';
-    lbl.on('pointerover', () =>
-      this.tweens.add({ targets: [gfx, lbl], scaleX: 1.12, scaleY: 1.12, duration: 110, ease: 'Back.easeOut' }));
-    lbl.on('pointerout', () =>
-      this.tweens.add({ targets: [gfx, lbl], scaleX: 1, scaleY: 1, duration: 110 }));
-    lbl.on('pointerup', () => this.scene.start('GameScene', { level: 'ex' }));
 
-    this.add.text(x, y + R + 16, 'Anniversary', {
+    if (open) {
+      lbl.setInteractive(new Phaser.Geom.Rectangle(-R, -R, R * 2, R * 2),
+                         Phaser.Geom.Rectangle.Contains);
+      lbl.input.cursor = 'pointer';
+      lbl.on('pointerover', () =>
+        this.tweens.add({ targets: [gfx, lbl], scaleX: 1.12, scaleY: 1.12, duration: 110, ease: 'Back.easeOut' }));
+      lbl.on('pointerout', () =>
+        this.tweens.add({ targets: [gfx, lbl], scaleX: 1, scaleY: 1, duration: 110 }));
+      lbl.on('pointerup', () => this.scene.start('GameScene', { level: 'ex' }));
+    } else {
+      // Small padlock over the EX, matching the locked numbered nodes.
+      gfx.fillStyle(0xffffff, 0.75).fillRoundedRect(-9, 6, 18, 14, 3);
+      gfx.lineStyle(4, 0xffffff, 0.75);
+      gfx.beginPath(); gfx.arc(0, 6, 8, Math.PI, 0, false); gfx.strokePath();
+    }
+
+    this.add.text(x, y + R + 16, open ? 'Anniversary' : exOpensLabel(), {
       fontSize: '11px', fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffffff', stroke: '#7a5000', strokeThickness: 4,
+      color: '#ffffff', stroke: open ? '#7a5000' : '#6b6350', strokeThickness: 4,
     }).setOrigin(0.5);
   }
 
