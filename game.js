@@ -325,11 +325,25 @@ function generateDoorPuzzle() {
 // (`idle`, `idle_f`, `idle_gold`, ...) — see buildAnims and _animKey.
 // `unlockFlag` names a saved-progress boolean; a skin with one stays
 // locked in the picker until that flag is set.
+// `effects` are the lines shown in an item's profile.  Tone drives the
+// colour so a buff, a drawback and a plain statement are told apart at a
+// glance — reusable for weapons and armour, which will want the same
+// treatment for trade-offs like "-50% move speed / +250% damage".
+// `mods` is the mechanical half: what the effect text actually does.
+const EFFECT_TONE = {
+  good:    '#1a8f3c',   // a benefit
+  bad:     '#c62828',   // a drawback
+  neutral: '#5c5c66',   // flavour, or a statement with no value attached
+};
 const SKINS = [
-  { key: 'default', label: 'Default', tex: 'player_idle',   suffix: ''      },
-  { key: 'female',  label: 'Female',  tex: 'player_female', suffix: '_f'    },
+  { key: 'default', label: 'Default', tex: 'player_idle',   suffix: '',
+    effects: [] },
+  { key: 'female',  label: 'Female',  tex: 'player_female', suffix: '_f',
+    effects: [] },
   { key: 'gold',    label: 'Gold',    tex: 'player_gold',   suffix: '_gold',
-    unlockFlag: 'goldSkinUnlocked', lockedHint: 'Beat the EX level' },
+    unlockFlag: 'goldSkinUnlocked', lockedHint: 'Beat the EX level',
+    effects: [{ text: '2x Elemental Damage & Effects', tone: 'good' }],
+    mods: { elementDamage: 2, elementEffect: 2 } },
 ];
 const SKIN_BY_KEY        = Object.fromEntries(SKINS.map(s => [s.key, s]));
 const SKIN_ANIM_SUFFIX   = Object.fromEntries(SKINS.map(s => [s.key, s.suffix]));
@@ -784,65 +798,144 @@ class MenuScene extends Phaser.Scene {
       this.input.keyboard.once('keydown-SPACE', startGame);
 
       // ── Skin picker panel (hidden until "SKINS" is clicked) ──────
-      // Shows every skin side by side with a live preview frame; the
-      // selected one gets a gold border.  Locked skins (the gold EX
-      // reward) render greyed out with a hint and can't be selected —
-      // visible rather than hidden so there's something to play for.
+      // Cards on the left only *preview* a skin; the profile on the
+      // right shows its effects, and nothing is worn until EQUIP is
+      // pressed.  Locked skins can still be previewed so the reward is
+      // legible before it's earned.
       let skinChoice = skinUnlocked(progress.skin, progress) ? progress.skin : 'default';
+      let previewKey = skinChoice;
       const panelObjects = [];
-      const cardW = 160, cardH = 200, gap = 30;
       const cards = {};
-      const rowW = cardW * SKINS.length + gap * (SKINS.length - 1);
-      const startX = width/2 - rowW/2 + cardW/2;
+      const cardW = 104, cardH = 148, gap = 12;
+      const rowW  = cardW * SKINS.length + gap * (SKINS.length - 1);
+      const cardsY = height / 2 + 10;
+      const startX = 28 + cardW / 2;
+      const profX  = 590;
 
-      panelObjects.push(this.add.text(width/2, height/2 - 110, 'Choose your skin', {
-        fontSize: '22px', fontFamily: '"Arial Black", Arial, sans-serif',
-        color: '#2d6a4f', stroke: '#ffffff', strokeThickness: 4
+      panelObjects.push(this.add.text(width / 2, 52, 'Skins', {
+        fontSize: '24px', fontFamily: '"Arial Black", Arial, sans-serif',
+        color: '#2d6a4f', stroke: '#ffffff', strokeThickness: 4,
       }).setOrigin(0.5));
 
-      const selectSkin = (skinKey) => {
-        if (!skinUnlocked(skinKey, progress)) return;
-        skinChoice = skinKey;
-        saveProgress({ skin: skinKey });
+      // ── Profile column ─────────────────────────────────────────
+      const profBg = this.add.rectangle(profX, cardsY, 340, 300, 0xffffff)
+        .setStrokeStyle(3, 0xcccccc);
+      const profName = this.add.text(profX, cardsY - 126, '', {
+        fontSize: '20px', fontFamily: '"Arial Black", Arial, sans-serif',
+        color: '#2d3142',
+      }).setOrigin(0.5);
+      const profImg = this.add.image(profX, cardsY - 56, 'player_idle', 0).setScale(4.5);
+      const profHdr = this.add.text(profX, cardsY + 14, 'SPECIAL EFFECTS', {
+        fontSize: '12px', fontFamily: '"Arial Black", Arial, sans-serif',
+        color: '#8a8a99',
+      }).setOrigin(0.5);
+      const profRule = this.add.rectangle(profX, cardsY + 28, 280, 2, 0xdddddd);
+      const profLines = [0, 1, 2].map(i =>
+        this.add.text(profX, cardsY + 48 + i * 22, '', {
+          fontSize: '14px', fontFamily: '"Arial Black", Arial, sans-serif',
+          color: EFFECT_TONE.neutral, align: 'center',
+          wordWrap: { width: 300 },
+        }).setOrigin(0.5));
+
+      const equipBtn = this.add.text(profX, cardsY + 118, '  EQUIP  ', {
+        fontSize: '18px', fontFamily: '"Arial Black", Arial, sans-serif',
+        color: '#ffffff', backgroundColor: '#4caf50', padding: { x: 16, y: 8 },
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      equipBtn.on('pointerover', () => equipBtn.setStyle({ backgroundColor: '#5cc75f' }));
+      equipBtn.on('pointerout',  () => equipBtn.setStyle({ backgroundColor: '#4caf50' }));
+
+      panelObjects.push(profBg, profName, profImg, profHdr, profRule, equipBtn, ...profLines);
+
+      const paintCards = () => {
         SKINS.forEach(def => {
-          if (!skinUnlocked(def.key, progress)) return;
-          cards[def.key].border.setStrokeStyle(4, def.key === skinKey ? 0xffd700 : 0xcccccc);
+          const c = cards[def.key];
+          const isWorn    = def.key === skinChoice;
+          const isPreview = def.key === previewKey;
+          // Gold ring = currently worn, dark ring = just being previewed.
+          c.border.setStrokeStyle(4, isWorn ? 0xffd700 : isPreview ? 0x5c6f8a : 0xcccccc);
+          c.worn.setVisible(isWorn);
         });
       };
 
-      SKINS.forEach((def, i) => {
-        const cx = startX + i * (cardW + gap);
-        const cy = height/2 + 5;
+      const refreshProfile = () => {
+        const def = SKIN_BY_KEY[previewKey];
         const unlocked = skinUnlocked(def.key, progress);
-        const border = this.add.rectangle(cx, cy, cardW, cardH, unlocked ? 0xffffff : 0xdddddd)
-          .setStrokeStyle(4, !unlocked ? 0xaaaaaa
-                             : def.key === skinChoice ? 0xffd700 : 0xcccccc);
-        const preview = this.add.image(cx, cy, def.tex, 0).setScale(4);
-        panelObjects.push(border, preview);
-        if (unlocked) {
-          border.setInteractive({ useHandCursor: true });
-          border.on('pointerup', () => selectSkin(def.key));
+        profName.setText(def.label);
+        profImg.setTexture(def.tex, 0);
+        if (unlocked) profImg.clearTint(); else profImg.setTintFill(0x999999);
+
+        const fx = def.effects || [];
+        profLines.forEach((line, i) => {
+          if (i < fx.length) {
+            line.setText(fx[i].text).setColor(EFFECT_TONE[fx[i].tone] || EFFECT_TONE.neutral);
+          } else if (i === 0 && !fx.length) {
+            line.setText('None').setColor(EFFECT_TONE.neutral);
+          } else {
+            line.setText('');
+          }
+        });
+
+        // Button reflects state: wearable, already worn, or still locked.
+        if (!unlocked) {
+          equipBtn.setText(`  ${def.lockedHint || 'LOCKED'}  `)
+                  .setStyle({ backgroundColor: '#9a9a9a' }).disableInteractive();
+        } else if (def.key === skinChoice) {
+          equipBtn.setText('  EQUIPPED  ')
+                  .setStyle({ backgroundColor: '#b0b0b0' }).disableInteractive();
         } else {
-          // Silhouette the preview and label what unlocks it.
-          preview.setTintFill(0x777777);
-          const hint = this.add.text(cx, cy + cardH/2 - 26, def.lockedHint || 'Locked', {
-            fontSize: '13px', fontFamily: '"Arial Black", Arial, sans-serif',
-            color: '#ffffff', backgroundColor: '#00000088',
-            padding: { x: 6, y: 4 }, align: 'center',
-            wordWrap: { width: cardW - 20 },
-          }).setOrigin(0.5);
-          panelObjects.push(hint);
+          equipBtn.setText('  EQUIP  ')
+                  .setStyle({ backgroundColor: '#4caf50' })
+                  .setInteractive({ useHandCursor: true });
         }
-        cards[def.key] = { border, preview };
+        paintCards();
+      };
+
+      equipBtn.on('pointerup', () => {
+        if (!skinUnlocked(previewKey, progress) || previewKey === skinChoice) return;
+        skinChoice = previewKey;
+        saveProgress({ skin: skinChoice });
+        refreshProfile();
       });
 
-      const backBtn = makeBtn(height/2 + 145, 'BACK', '#8c8c8c', '#6c6c6c', () => hideSkinPicker());
+      // ── Cards column ───────────────────────────────────────────
+      SKINS.forEach((def, i) => {
+        const cx = startX + i * (cardW + gap);
+        const unlocked = skinUnlocked(def.key, progress);
+        const border = this.add.rectangle(cx, cardsY, cardW, cardH,
+                                          unlocked ? 0xffffff : 0xdddddd)
+          .setStrokeStyle(4, 0xcccccc)
+          .setInteractive({ useHandCursor: true });
+        const preview = this.add.image(cx, cardsY - 8, def.tex, 0).setScale(3);
+        if (!unlocked) preview.setTintFill(0x777777);
+        const name = this.add.text(cx, cardsY + cardH / 2 - 18, def.label, {
+          fontSize: '13px', fontFamily: '"Arial Black", Arial, sans-serif',
+          color: unlocked ? '#2d3142' : '#7a7a86',
+        }).setOrigin(0.5);
+        // Small tick marking the skin actually being worn.
+        const worn = this.add.text(cx + cardW / 2 - 14, cardsY - cardH / 2 + 12, '\u2713', {
+          fontSize: '16px', fontFamily: '"Arial Black", Arial, sans-serif',
+          color: '#1a8f3c',
+        }).setOrigin(0.5).setVisible(false);
+
+        // Clicking previews — it does not equip.
+        border.on('pointerup', () => { previewKey = def.key; refreshProfile(); });
+        cards[def.key] = { border, preview, name, worn };
+        panelObjects.push(border, preview, name, worn);
+      });
+
+      // Sits between the profile card's bottom edge (~400) and the
+      // controls footer (~456) so it collides with neither.
+      const backBtn = makeBtn(height / 2 + 175, 'BACK', '#8c8c8c', '#6c6c6c', () => hideSkinPicker());
       panelObjects.push(backBtn);
+      refreshProfile();
       panelObjects.forEach(o => o.setVisible(false));
 
       function showSkinPicker() {
         mainMenuObjects.forEach(o => o.setVisible(false));
         panelObjects.forEach(o => o.setVisible(true));
+        // Blanket-showing the panel also un-hides the per-card "worn"
+        // ticks, so re-apply the state-driven visibility afterwards.
+        refreshProfile();
       }
       function hideSkinPicker() {
         panelObjects.forEach(o => o.setVisible(false));
@@ -3790,12 +3883,18 @@ class GameScene extends Phaser.Scene {
     pr.setFlipX(dir < 0);
     pr.body.setAllowGravity(false);
     pr.body.setVelocityX(dir * def.speed);
+    // Skin modifiers — the gold skin doubles elemental damage and the
+    // riders that come with it (knockback, and burn duration).
+    const mods   = (SKIN_BY_KEY[this._skin] || {}).mods || {};
+    const dmgMul = mods.elementDamage || 1;
+    const effMul = mods.elementEffect || 1;
+
     pr._dir = dir;
-    pr._damage = def.damage;
+    pr._damage = Math.round(def.damage * dmgMul);
     pr._maxX = startX + dir * def.range * 32;
     pr._burstColors = def.burst;
-    if (def.knockback) pr._knockback = def.knockback;
-    if (def.burn) pr._burn = def.burn;
+    if (def.knockback) pr._knockback = def.knockback * effMul;
+    if (def.burn) pr._burn = { ...def.burn, ticks: Math.round(def.burn.ticks * effMul) };
     // Crop the hitbox to the painted pixels.  Each element's art fills
     // only part of its 32x32 frame, so the default full-frame body would
     // burst the shot well before it visually touches anything now that
