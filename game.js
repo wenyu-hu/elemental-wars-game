@@ -389,9 +389,11 @@ const EFFECT_TONE = {
   neutral: '#5c5c66',   // flavour, or a statement with no value attached
 };
 const SKINS = [
-  { key: 'default', label: 'Default', tex: 'player_idle',   suffix: '',
+  // `key` is what gets persisted in save data — only `label` is display
+  // text, so these can be renamed freely without breaking saves.
+  { key: 'default', label: 'Skin 1', tex: 'player_idle',   suffix: '',
     effects: [] },
-  { key: 'female',  label: 'Female',  tex: 'player_female', suffix: '_f',
+  { key: 'female',  label: 'Skin 2', tex: 'player_female', suffix: '_f',
     effects: [] },
   { key: 'gold',    label: 'Gold',    tex: 'player_gold',   suffix: '_gold',
     unlockFlag: 'goldSkinUnlocked', lockedHint: 'Beat the EX level',
