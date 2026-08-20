@@ -21,7 +21,7 @@ const TS    = TILE * SCALE;   // 96px display per tile
 // over floors (see _wireProjectileObstacles) instead of flying at chest
 // height — that's what makes the water shot look like a wave.
 const ELEMENT_DEFS = {
-  fire:  { icon: 'icon_fire',  damage: 3, range: 10, reload: 3000, speed: 380, scale: 1.2, burst: [0xffd28a, 0xffa640, 0xff6a1f, 0xd83c10], burn: { ticks: 3, dmgPerTick: 1, tickMs: 1000 } },
+  fire:  { icon: 'icon_fire',  damage: 3, range: 10, reload: 3000, speed: 380, scale: 1.2, burst: [0xffd28a, 0xffa640, 0xff6a1f, 0xd83c10], burn: 1 },
   water: { icon: 'icon_water', damage: 2, range: 8,  reload: 2000, speed: 420, scale: 1.2, burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd], hugsGround: true, knockback: 260 },
   // Air's art is only 8x8 inside its 32x32 frame.  scale 2.4 makes the
   // cropped hitbox 8*3*2.4 = 57.6px — the same size the old uncropped
@@ -133,6 +133,32 @@ const FOOD_DROPS = [
 // implemented so far; the rest are drawn from the same sheet the moment
 // their mechanic lands, so nothing needs re-wiring then.
 const EFFECT_ICON_FRAME = { burning: 0, poisoned: 1, frozen: 2, stunned: 3 };
+
+// Tier tables, indexed 1-5 (index 0 is a hole so `EFFECT_TIERS.burn[3]`
+// reads as "Burn III").  Tiers IV and V are reserved for late-game
+// equipment — no element applies them.  See element-tree.md.
+//
+// Burn refreshes; poison stacks.  A lower tier never overwrites a higher
+// one, and never refreshes it either — otherwise a cheap fast element
+// would sustain an expensive slow one's effect for free.
+const EFFECT_TIERS = {
+  // Ticks once a second, so `ticks` is also the duration in seconds.
+  burn:   [null, { dmgPerTick: 1, ticks: 3 }, { dmgPerTick: 1, ticks: 5 },
+                 { dmgPerTick: 2, ticks: 5 }, { dmgPerTick: 2, ticks: 8 },
+                 { dmgPerTick: 3, ticks: 10 }],
+  // 1 damage per tick per stack, so the stack count is the tick damage.
+  poison: [null, { tickMs: 3000, ms: 10000 }, { tickMs: 2500, ms: 12000 },
+                 { tickMs: 2000, ms: 15000 }, { tickMs: 1500, ms: 20000 },
+                 { tickMs: 1000, ms: 25000 }],
+  // `shatter` multiplies the hit that breaks the freeze.
+  freeze: [null, { ms: 1000, shatter: 1.2 }, { ms: 2000, shatter: 1.4 },
+                 { ms: 3000, shatter: 1.6 }, { ms: 4000, shatter: 1.8 },
+                 { ms: 5000, shatter: 2.0 }],
+  stun:   [null, { ms: 500 }, { ms: 1000 }, { ms: 1500 }, { ms: 2000 },
+                 { ms: 2500 }],
+};
+const POISON_MAX_STACKS = 3;
+const BURN_TICK_MS      = 1000;
 
 // Reads whichever status flags an enemy is carrying.  Kept in one place
 // so adding a status means touching this and the sheet, nothing else.
@@ -1840,6 +1866,12 @@ class GameScene extends Phaser.Scene {
     for (const z of this.zombies) {
       if (z.dead || !z.sprite.active) continue;
       const s = z.sprite, cfg = z.cfg, A = cfg.anim;
+
+      // Frozen and stunned both stop it where it stands.  This sits ahead
+      // of the timers on purpose: nothing counts down while held, so a
+      // stun resumes the state machine exactly where it left off.
+      if (z.frozen || z.stunned) { s.body.setVelocityX(0); continue; }
+
       if (z.timer    > 0) z.timer    -= delta;
       if (z.cooldown > 0) z.cooldown -= delta;
 
@@ -1995,6 +2027,10 @@ class GameScene extends Phaser.Scene {
   _hitZombie(z, dmg, fromX, opts = {}) {
     if (!z || z.dead) return;
     const s = z.sprite, cfg = z.cfg;
+    // Anchored while frozen: the hit that shatters lands for extra but
+    // doesn't shove, so the freeze can't be wasted by knocking them away.
+    const wasFrozen = !!z.frozen;
+    dmg = this._shatter(z, dmg, opts);
     z.hp = Math.max(0, z.hp - dmg);
     if (z.hp <= 0) {
       z.dead = true;
@@ -2007,8 +2043,8 @@ class GameScene extends Phaser.Scene {
       });
       return;
     }
-    if (opts.burn) this._applyBurn(z, opts.burn);
-    if (opts.dot) return;
+    this._applyHitEffects(z, opts);
+    if (opts.dot || wasFrozen) return;
     z.state = 'knockback';
     z.timer = cfg.knockbackMs;
     s.anims.play(cfg.anim + '_knockback', true);
@@ -2044,6 +2080,11 @@ class GameScene extends Phaser.Scene {
     for (const g of this.guards) {
       if (g.dead || !g.sprite.active) continue;
       const s = g.sprite;
+
+      // Held in place, same as a zombie — ahead of the timers so a stun
+      // suspends the wind-up rather than letting it run down.
+      if (g.frozen || g.stunned) { s.body.setVelocityX(0); continue; }
+
       if (g.timer    > 0) g.timer    -= delta;
       if (g.cooldown > 0) g.cooldown -= delta;
 
@@ -2160,6 +2201,8 @@ class GameScene extends Phaser.Scene {
   _hitGuard(g, dmg, fromX, opts = {}) {
     if (!g || g.dead) return;
     const s = g.sprite;
+    const wasFrozen = !!g.frozen;
+    dmg = this._shatter(g, dmg, opts);
     g.hp = Math.max(0, g.hp - dmg);
     if (g.hp <= 0) {
       g.dead = true;
@@ -2170,8 +2213,8 @@ class GameScene extends Phaser.Scene {
       });
       return;
     }
-    if (opts.burn) this._applyBurn(g, opts.burn);
-    if (opts.dot) return;
+    this._applyHitEffects(g, opts);
+    if (opts.dot || wasFrozen) return;
     s.setTintFill(0xffffff);
     this.time.delayedCall(80, () => { if (!g.dead) s.clearTint(); });
     g.state = 'knockback';
@@ -2689,9 +2732,11 @@ class GameScene extends Phaser.Scene {
   _hitEmperor(dmg, opts = {}) {
     const e = this.emperor;
     if (!e || e.dead) return;
-    // Burns like anything else; knockback is ignored by design so he
-    // can't be pinned in a combo.
-    if (opts.burn) this._applyBurn(e, opts.burn);
+    // Takes damage-over-time like anything else, and shatters out of a
+    // freeze — but knockback, and the freeze/stun holds themselves, are
+    // ignored by design so he can't be pinned in a combo.
+    dmg = this._shatter(e, dmg, opts);
+    this._applyHitEffects(e, opts);
     e.hp = Math.max(0, e.hp - dmg);
     e.sprite.setTintFill(0xffffff);
     this.time.delayedCall(70, () => { if (!e.dead) e.sprite.clearTint(); });
@@ -2786,30 +2831,97 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  // Tick fire burn DOT on ranged dummies: 1 dmg/sec for a few seconds.
-  // Refreshes rather than stacks, so spamming fire re-arms the burn
-  // instead of compounding it.
-  _applyBurn(e, burnDef) {
-    if (!e || e.dead || !burnDef) return;
-    e.burn = { ticksLeft: burnDef.ticks, dmgPerTick: burnDef.dmgPerTick,
-               tickMs: burnDef.tickMs, msLeft: burnDef.tickMs };
+  // Applies one status at one tier.  A lower tier is ignored outright —
+  // it can't downgrade an active effect and can't refresh its timer.
+  _applyEffect(e, kind, tier) {
+    if (!e || e.dead || !tier) return;
+    const def = (EFFECT_TIERS[kind] || [])[tier];
+    if (!def) return;
+    switch (kind) {
+      case 'burn':
+        if (e.burn && e.burn.tier > tier) return;
+        e.burn = { tier, dmgPerTick: def.dmgPerTick, ticksLeft: def.ticks,
+                   msLeft: BURN_TICK_MS };
+        break;
+      case 'poison': {
+        if (e.poison && e.poison.tier > tier) return;
+        // Stacks share one refreshed timer rather than each tracking its
+        // own expiry — simpler to display and to reason about.
+        const stacks = e.poison
+          ? Math.min(POISON_MAX_STACKS, e.poison.stacks + 1) : 1;
+        e.poison = { tier, stacks, tickMs: def.tickMs,
+                     msLeft: def.tickMs, msTotal: def.ms };
+        break;
+      }
+      case 'freeze':
+        if (e.frozen && e.frozen.tier > tier) return;
+        e.frozen = { tier, msLeft: def.ms, shatter: def.shatter };
+        // Freeze is a hard interrupt: a wind-up in progress is thrown
+        // away.  Stun deliberately isn't — it resumes where it left off.
+        if (e.state === 'windup' || e.state === 'attack') {
+          e.state = 'idle';
+          e.timer = 0;
+        }
+        break;
+      case 'stun':
+        if (e.stunned && e.stunned.tier > tier) return;
+        e.stunned = { tier, msLeft: def.ms };
+        break;
+    }
   }
 
-  // Ticks burn on every kind of enemy, not just the level-2 dummies.
-  _updateBurns(delta) {
-    const tick = (e, hit) => {
+  // Everything an element's `opts` can inflict, in one place so the three
+  // _hit* methods stay identical in what they support.
+  _applyHitEffects(e, opts) {
+    if (opts.burn)   this._applyEffect(e, 'burn',   opts.burn);
+    if (opts.poison) this._applyEffect(e, 'poison', opts.poison);
+    if (opts.freeze) this._applyEffect(e, 'freeze', opts.freeze);
+    if (opts.stun)   this._applyEffect(e, 'stun',   opts.stun);
+  }
+
+  // A frozen target takes its tier's multiplier on the hit that breaks
+  // the freeze, and thaws.  DOT ticks don't shatter — only a real hit.
+  _shatter(e, dmg, opts) {
+    if (!e || !e.frozen || opts.dot) return dmg;
+    const out = Math.round(dmg * e.frozen.shatter);
+    e.frozen = null;
+    return out;
+  }
+
+  // Ticks every damage-over-time status on every kind of enemy, and runs
+  // down the two crowd-control timers.
+  _updateEffects(delta) {
+    const burnTick = (e, hit) => {
       if (!e || e.dead || !e.burn) return;
       e.burn.msLeft -= delta;
       if (e.burn.msLeft > 0) return;
       hit(e.burn.dmgPerTick);
       e.burn.ticksLeft -= 1;
-      if (e.burn.ticksLeft > 0 && !e.dead) e.burn.msLeft += e.burn.tickMs;
+      if (e.burn.ticksLeft > 0 && !e.dead) e.burn.msLeft += BURN_TICK_MS;
       else e.burn = null;
     };
-    for (const rd of this.rangedDummies || []) tick(rd, n => this._damageRangedDummy(rd, n));
-    for (const z of this.zombies || [])  tick(z, n => this._hitZombie(z, n, z.sprite.x, { dot: true }));
-    for (const g of this.guards  || [])  tick(g, n => this._hitGuard(g,  n, g.sprite.x, { dot: true }));
-    if (this.emperor) tick(this.emperor, n => this._hitEmperor(n, { dot: true }));
+    // Tick damage is the stack count: 1 per stack, capped at 3.
+    const poisonTick = (e, hit) => {
+      if (!e || e.dead || !e.poison) return;
+      e.poison.msTotal -= delta;
+      e.poison.msLeft  -= delta;
+      if (e.poison.msLeft <= 0) {
+        hit(e.poison.stacks);
+        e.poison.msLeft += e.poison.tickMs;
+      }
+      if (e.poison.msTotal <= 0) e.poison = null;
+    };
+    const ccTick = (e) => {
+      if (!e || e.dead) return;
+      if (e.frozen  && (e.frozen.msLeft  -= delta) <= 0) e.frozen  = null;
+      if (e.stunned && (e.stunned.msLeft -= delta) <= 0) e.stunned = null;
+    };
+    const all = (e, hit) => { burnTick(e, hit); poisonTick(e, hit); ccTick(e); };
+
+    for (const rd of this.rangedDummies || []) all(rd, n => this._damageRangedDummy(rd, n));
+    for (const z of this.zombies || [])  all(z, n => this._hitZombie(z, n, z.sprite.x, { dot: true }));
+    for (const g of this.guards  || [])  all(g, n => this._hitGuard(g,  n, g.sprite.x, { dot: true }));
+    if (this.emperor) all(this.emperor, n => this._hitEmperor(n, { dot: true }));
     this._updateStatusIcons();
   }
 
@@ -3727,7 +3839,7 @@ class GameScene extends Phaser.Scene {
         else if (pr._dir < 0 && pr.x < pr._maxX) pr.destroy();
       });
     }
-    this._updateBurns(delta);
+    this._updateEffects(delta);
   }
 
   _updateLevel2(delta) {
