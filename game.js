@@ -5551,10 +5551,9 @@ class HUDScene extends Phaser.Scene {
     this._bossBarObjs = [this.bossLabel, bossBg, this.bossFill, this.bossGhost,
                          bossEdge, this.bossText];
     this._bossBarObjs.forEach(o => o.setVisible(false));
-    // Boss statuses hang under the bar instead of over the sprite, at
-    // double the size the peons use — there's room here, and the boss is
-    // the one fight where knowing the exact tier actually matters.
-    this._BOSS_BADGE = 64;
+    // Boss statuses hang under the bar instead of over the sprite, at the
+    // same size the peons use, left-aligned with the bar.
+    this._BOSS_BADGE = 32;
     this._BOSS_BADGE_Y = bossY + BOSS_H / 2 + 10 + this._BOSS_BADGE / 2;
     this._bossStatusIcons = [];
 
@@ -5794,10 +5793,10 @@ class HUDScene extends Phaser.Scene {
   }
 
   // The boss's statuses, drawn under his healthbar rather than over his
-  // sprite.  Same layout as the peons' badge row in GameScene, just at
-  // double the size and anchored to the HUD instead of to a world sprite.
+  // sprite.  Same size and layout as the peons' badge row in GameScene,
+  // just anchored to the HUD instead of to a world sprite.
   _updateBossStatusIcons(boss) {
-    const BADGE = this._BOSS_BADGE, GAP = 8;
+    const BADGE = this._BOSS_BADGE, GAP = 4;
     const keys = boss ? activeStatuses(boss) : [];
     while (this._bossStatusIcons.length > keys.length) {
       const b = this._bossStatusIcons.pop();
@@ -5809,18 +5808,17 @@ class HUDScene extends Phaser.Scene {
         img: this.add.image(0, 0, 'effect_icons', 0)
           .setDisplaySize(BADGE, BADGE),
         tier: this.add.text(0, 0, '', {
-          fontSize: '20px', fontFamily: '"Arial Black", Arial, sans-serif',
-          color: '#ffffff', stroke: '#000000', strokeThickness: 5,
+          fontSize: '14px', fontFamily: '"Arial Black", Arial, sans-serif',
+          color: '#ffffff', stroke: '#000000', strokeThickness: 4,
         }).setOrigin(1, 1),
       });
     }
     if (!keys.length) return;
-    const W = this.scale.width;
-    const rowW = keys.length * BADGE + (keys.length - 1) * GAP;
+    // Left-aligned with the bar, filling rightwards as statuses stack up.
     const y = this._BOSS_BADGE_Y;
     keys.forEach((k, i) => {
       const b  = this._bossStatusIcons[i];
-      const cx = W / 2 - rowW / 2 + BADGE / 2 + i * (BADGE + GAP);
+      const cx = this._BOSS_X + BADGE / 2 + i * (BADGE + GAP);
       b.img.setFrame(EFFECT_ICON_FRAME[k]).setPosition(cx, y);
       const st = boss[STATUS_FIELD[k]];
       b.tier.setText(ROMAN[st && st.tier] || '')
