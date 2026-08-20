@@ -2968,7 +2968,7 @@ class GameScene extends Phaser.Scene {
   // has no bar, so badges sit in a row above the sprite.  Several can be
   // active at once, so they lay out side by side rather than stacking.
   _updateStatusIcons() {
-    const BADGE = 32, GAP = 4;
+    const BADGE = 64, GAP = 6;
     const mark = (e) => {
       if (!e || !e.sprite) return;
       const live = !e.dead && e.sprite.active;
@@ -2984,23 +2984,24 @@ class GameScene extends Phaser.Scene {
         e.statusIcons.push({
           img: this.add.image(0, 0, 'effect_icons', 0)
             .setDisplaySize(BADGE, BADGE).setDepth(16),
-          // Numeral hangs off the badge's bottom-right corner rather than
-          // sitting inside it, so it never covers the icon art.
+          // Numeral sits inside the badge's bottom-right corner.  The
+          // heavy stroke is what keeps it readable over the icon art.
           tier: this.add.text(0, 0, '', {
-            fontSize: '14px', fontFamily: '"Arial Black", Arial, sans-serif',
-            color: '#ffffff', stroke: '#000000', strokeThickness: 4,
+            fontSize: '20px', fontFamily: '"Arial Black", Arial, sans-serif',
+            color: '#ffffff', stroke: '#000000', strokeThickness: 5,
           }).setOrigin(1, 1).setDepth(17),
         });
       }
       const rowW = keys.length * BADGE + (keys.length - 1) * GAP;
-      const top  = e.sprite.y - e.sprite.displayHeight / 2 - 18;
+      // Badge centre, high enough that the taller badges clear the sprite.
+      const top  = e.sprite.y - e.sprite.displayHeight / 2 - 38;
       keys.forEach((k, i) => {
         const b  = e.statusIcons[i];
         const cx = e.sprite.x - rowW / 2 + BADGE / 2 + i * (BADGE + GAP);
         b.img.setFrame(EFFECT_ICON_FRAME[k]).setPosition(cx, top);
         const st = e[STATUS_FIELD[k]];
         b.tier.setText(ROMAN[st && st.tier] || '')
-              .setPosition(cx + BADGE / 2 + 3, top + BADGE / 2 + 3);
+              .setPosition(cx + BADGE / 2 - 4, top + BADGE / 2 - 2);
       });
     };
     (this.zombies || []).forEach(mark);
