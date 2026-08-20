@@ -5969,7 +5969,12 @@ class HUDScene extends Phaser.Scene {
   _buildJoystick(cx, cy) {
     const gs = this._gs;
     const BASE_R = 54, KNOB_R = 24;
-    const DEAD   = 0.22;            // fraction of BASE_R that reads as centred
+    // Fraction of BASE_R that reads as centred.  Sized for angular
+    // stability rather than jitter: the stationary-duck band is only 30
+    // degrees wide, and closer to the centre a few pixels of thumb wobble
+    // swing the angle far enough to fall out of it.  At 0.30 (16px) a 4px
+    // wobble moves the angle 14 degrees; at 0.22 it moved it 18.
+    const DEAD   = 0.30;
     const DUCK_MIN = 135, DUCK_MAX = 225;   // walk + duck
     const PURE_MIN = 165, PURE_MAX = 195;   // duck, no walk
 
