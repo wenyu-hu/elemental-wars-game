@@ -19,6 +19,48 @@ body {
            env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
+
+/* Fullscreen gate — shown only on touch devices, since orientation
+   locking is meaningless on desktop and the extra tap would just be in
+   the way.  Sits above the rotate prompt so a phone held portrait sees
+   this first, taps once, and lands in locked landscape. */
+#fullscreen-gate { display: none; }
+#fullscreen-gate.gone { display: none !important; }
+@media (pointer: coarse) {
+  #fullscreen-gate {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    background: #eef8ff;
+    font-family: "Arial Black", Arial, sans-serif;
+    text-align: center;
+    padding: 24px;
+  }
+  #fullscreen-gate .fs-title { font-size: 30px; color: #ff5722; letter-spacing: 0.02em; }
+  #fullscreen-gate .fs-sub {
+    font-size: 13px; font-family: Arial, sans-serif; color: #2d6a4f;
+  }
+  #fullscreen-gate #fs-play {
+    font: inherit; font-size: 19px;
+    padding: 16px 30px;            /* comfortably over the 44px target */
+    border: none; border-radius: 10px;
+    background: #ff5722; color: #fff;
+    cursor: pointer;
+  }
+  #fullscreen-gate #fs-skip {
+    font-family: Arial, sans-serif; font-size: 13px;
+    padding: 12px 18px;
+    border: none; background: transparent;
+    color: #6b7280; text-decoration: underline;
+    cursor: pointer;
+  }
+}
+
 /* Portrait phones letterbox the 800x480 game down to ~28% of the screen,
    which isn't playable — ask for landscape instead.  Height cap keeps
    this off desktop windows that merely happen to be tall. */

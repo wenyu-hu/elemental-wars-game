@@ -131,7 +131,7 @@
   defineItem({
     id:      'wooden_sword',
     name:    'Wooden Sword',
-    iconSrc: 'assets/Sword.png',
+    iconSrc: 'assets/items/Sword.png',
     type:    'meleeWeapon',
     rarity:  'common',
     stats: { damage: 2, attackSpeed: 0.6, range: 3, specialities: '' },
@@ -140,7 +140,7 @@
   defineItem({
     id:      'wooden_shield',
     name:    'Wooden Shield',
-    iconSrc: 'assets/Shield.png',
+    iconSrc: 'assets/items/Shield.png',
     type:    'defence',
     rarity:  'common',
     stats: { defenceLevel: 2 },

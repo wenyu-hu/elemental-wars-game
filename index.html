@@ -33,6 +33,41 @@
     <div class="rp-title">Turn your device sideways</div>
     <div class="rp-sub">Elemental Wars is played in landscape.</div>
   </div>
+
+  <!-- Orientation can only be locked from fullscreen, so on a phone the
+       game is entered through this gate.  Both APIs are best-effort: iOS
+       Safari has no lockOrientation at all, and the rotate prompt above
+       stays as the fallback for it. -->
+  <div id="fullscreen-gate">
+    <div class="fs-title">ELEMENTAL WARS</div>
+    <button id="fs-play" type="button">▶ PLAY FULLSCREEN</button>
+    <div class="fs-sub">Locks to landscape for the best fit.</div>
+    <button id="fs-skip" type="button">Continue without fullscreen</button>
+  </div>
+  <script>
+    (function () {
+      const gate = document.getElementById('fullscreen-gate');
+      const dismiss = () => gate.classList.add('gone');
+
+      document.getElementById('fs-play').addEventListener('click', async () => {
+        const el = document.documentElement;
+        try {
+          const req = el.requestFullscreen || el.webkitRequestFullscreen;
+          if (req) await req.call(el);
+        } catch (e) { /* refused — carry on windowed */ }
+        try {
+          // Not on iOS Safari, and throws on some Androids if the device
+          // is already held the other way.  Never let it block entry.
+          if (screen.orientation && screen.orientation.lock) {
+            await screen.orientation.lock('landscape');
+          }
+        } catch (e) { /* unsupported or refused */ }
+        dismiss();
+      });
+
+      document.getElementById('fs-skip').addEventListener('click', dismiss);
+    })();
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
   <script>
     // Cache-bust local sources so the dev server's no-cache-headers

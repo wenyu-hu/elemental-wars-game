@@ -558,6 +558,13 @@ function showAuthForm({ mode, onSuccess, onCancel }) {
   title.style.cssText = 'margin:0 0 6px;color:#ff5722;font-size:22px;';
   card.appendChild(title);
 
+  // Roomier padding on touch: the desktop sizes leave inputs at 39px and
+  // buttons at 36px, both under the ~44px comfortable target.  Font size
+  // stays 16px either way — below that, iOS zooms the page on focus.
+  const touchUI  = deviceIsTouch();
+  const fieldPad = touchUI ? '12px 12px' : '8px 10px';
+  const btnPad   = touchUI ? '13px 22px' : '8px 16px';
+
   const makeField = (labelText, type, autocomplete) => {
     const wrap = document.createElement('label');
     wrap.textContent = labelText;
@@ -566,7 +573,7 @@ function showAuthForm({ mode, onSuccess, onCancel }) {
     input.type = type;
     input.autocomplete = autocomplete;
     input.style.cssText = [
-      'margin-top:4px', 'padding:8px 10px',
+      'margin-top:4px', `padding:${fieldPad}`,
       'font:16px Arial,sans-serif', 'border:2px solid #ccc',
       'border-radius:6px', 'outline:none',
     ].join(';');
@@ -591,14 +598,14 @@ function showAuthForm({ mode, onSuccess, onCancel }) {
   const cancelBtn = document.createElement('button');
   cancelBtn.textContent = 'Cancel';
   cancelBtn.style.cssText = [
-    'padding:8px 16px', 'font:14px "Arial Black",Arial,sans-serif',
+    `padding:${btnPad}`, 'font:14px "Arial Black",Arial,sans-serif',
     'color:#555', 'background:#eee', 'border:none', 'border-radius:6px', 'cursor:pointer',
   ].join(';');
 
   const submitBtn = document.createElement('button');
   submitBtn.textContent = mode === 'login' ? 'Log In' : 'Create Account';
   submitBtn.style.cssText = [
-    'padding:8px 16px', 'font:14px "Arial Black",Arial,sans-serif',
+    `padding:${btnPad}`, 'font:14px "Arial Black",Arial,sans-serif',
     'color:#fff', 'background:#ff5722', 'border:none', 'border-radius:6px', 'cursor:pointer',
   ].join(';');
 
@@ -5552,12 +5559,20 @@ class HUDScene extends Phaser.Scene {
     // ── Bar geometry ──────────────────────────────
     // Bars are horizontally centred on the screen.  Widened from 260x14
     // so they don't look undersized beside the enlarged element row.
-    const BAR_W = 340, BAR_H = 16;
+    // A landscape phone scales the 800x480 canvas to about 0.78, so a
+    // 36px button lands at 28 real pixels — well under the ~44px
+    // comfortable touch target.  With touch controls on, the whole HUD
+    // steps up so buttons land around 44.  Desktop keeps 36.
+    const TOUCH_HUD = touchControlsOn();
+    this._TOUCH_HUD = TOUCH_HUD;
+    const BAR_W = TOUCH_HUD ? 420 : 340, BAR_H = TOUCH_HUD ? 18 : 16;
     const BAR_X = Math.round((W - BAR_W) / 2);  // 230 for W=800
     // Stack measured up from the bottom edge: slots sit lowest (they're
     // the tallest now), then HP, then XP.
-    const xpY   = 402;
-    const hpY   = 422;
+    // Stack sits higher when the buttons are bigger, so the taller slot
+    // row still clears the bottom edge.
+    const xpY   = TOUCH_HUD ? 379 : 402;
+    const hpY   = TOUCH_HUD ? 401 : 422;
     this._BAR_W = BAR_W;
     this._BAR_X = BAR_X;
     this._HP_Y  = hpY;
@@ -5631,8 +5646,8 @@ class HUDScene extends Phaser.Scene {
     // Buttons are pushed out to three corners so the middle of the bottom
     // edge is free for the wider element row.  Pause goes top-right,
     // clear of the boss bar (which spans x 90-710) and its badges.
-    const BTN = 36;
-    const btnY  = 454;                 // bottom row, aligned with the slots
+    const BTN = TOUCH_HUD ? 56 : 36;    // 56 * 0.78 = 43.7 real px
+    const btnY  = TOUCH_HUD ? 444 : 454;   // bottom row, aligned with slots
     const pauseX = W - 28, pauseY = 28;
     const invX   = 28;
     const abX    = W - 28, abY = btnY;
@@ -5716,7 +5731,7 @@ class HUDScene extends Phaser.Scene {
         .setInteractive({ useHandCursor: true })
         .on('pointerup', () => this._gs && this._gs._fireElementInSlot(i));
       const icon = this.add.sprite(sx + slotSize / 2, slotY, 'icon_fire', 0)
-        .setScale(0.9).setVisible(false);   // scaled with the bigger slot
+        .setScale(TOUCH_HUD ? 1.4 : 0.9).setVisible(false);   // tracks slot size
       const darken = this.add.rectangle(sx, slotY, slotSize, slotSize, 0x000000, 0.55)
         .setOrigin(0, 0.5).setVisible(false);
       const reloadBar = this.add.rectangle(sx, slotY + slotSize / 2, slotSize, 0, 0x33aaff)
@@ -5762,9 +5777,14 @@ class HUDScene extends Phaser.Scene {
     this.touchToggle.on('pointerout',  () => this.touchToggle.setStyle({ backgroundColor: '#3f4a63' }));
     this.touchToggle.on('pointerup', () => {
       const next = { auto: 'on', on: 'off', off: 'auto' }[touchPref()];
+      const wasOn = touchControlsOn();
       setTouchPref(next);
       this.touchToggle.setText(labelFor());
       this._applyTouchControlVisibility();
+      // Button and bar sizes are decided in create(), so crossing the
+      // on/off line needs a rebuild — the HUD reads the paused state from
+      // GameScene each frame, so it comes straight back up paused.
+      if (touchControlsOn() !== wasOn) this.scene.restart();
     });
   }
 
@@ -5939,11 +5959,12 @@ class HUDScene extends Phaser.Scene {
       return circle;
     };
 
-    // Kept clear of the XP bar's top edge at y=394: a 56px button centred
-    // at 340 reaches 368, leaving 26px of air.
-    const rowY = 340, upY = 268;
+    // These only ever show alongside the enlarged touch HUD, whose XP bar
+    // top edge sits at y=370 — so a 56px button centred at 320 reaches
+    // 348, leaving 22px of air, and the joystick's base clears it by 24.
+    const rowY = 320, upY = 248;
     // Left thumb: a joystick (see _buildJoystick).
-    this._buildJoystick(96, 312);
+    this._buildJoystick(96, 292);
     // Right thumb: jump, attack, block.
     makeBtn(W - 52,  rowY, '▲', 'up');
     makeBtn(W - 132, rowY, '⚔', 'e', 24);
