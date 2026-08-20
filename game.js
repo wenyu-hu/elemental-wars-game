@@ -4236,8 +4236,17 @@ class GameScene extends Phaser.Scene {
     const suffix = SKIN_ANIM_SUFFIX[this._skin] || '';
     return base + suffix;
   }
+  // Strips whichever skin suffix an anim key carries, so 'duck_gold' and
+  // 'duck_f' both look up POSE.duck.  Driven off SKINS rather than a
+  // hard-coded '_f' — the gold skin's '_gold' fell straight through that
+  // and every pose silently fell back to idle, which is why its sword
+  // hung at the hip while ducking instead of sheathing across the back.
   _animBase(key) {
-    return (key && key.endsWith('_f')) ? key.slice(0, -2) : key;
+    if (!key) return key;
+    for (const sk of SKINS) {
+      if (sk.suffix && key.endsWith(sk.suffix)) return key.slice(0, -sk.suffix.length);
+    }
+    return key;
   }
 
   // Re-centre the 14×27 hitbox inside whatever frame the sprite is
