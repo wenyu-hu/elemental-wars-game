@@ -1245,7 +1245,7 @@ class GameScene extends Phaser.Scene {
         this.physics.add.collider(this.player.sprite, z.sprite);
         this.physics.add.overlap(z.sprite, this.elementProjectiles,
           (_s, pr) => { this._hitZombie(z, pr._damage || 1, pr.x,
-            { knockback: pr._knockback || 0, burn: pr._burn }); pr.destroy(); },
+            this._projOpts(pr)); pr.destroy(); },
           null, this);
       });
 
@@ -1266,7 +1266,7 @@ class GameScene extends Phaser.Scene {
         this.physics.add.collider(this.player.sprite, g.sprite);
         this.physics.add.overlap(g.sprite, this.elementProjectiles,
           (_s, pr) => { this._hitGuard(g, pr._damage || 1, pr.x,
-            { knockback: pr._knockback || 0, burn: pr._burn }); pr.destroy(); },
+            this._projOpts(pr)); pr.destroy(); },
           null, this);
       });
     }
@@ -1295,7 +1295,7 @@ class GameScene extends Phaser.Scene {
       this.physics.add.collider(this.player.sprite, this.emperor.sprite);
       this._buildThroneSpikes();
       this.physics.add.overlap(this.emperor.sprite, this.elementProjectiles,
-        (_s, pr) => { this._hitEmperor(pr._damage || 1, { burn: pr._burn }); pr.destroy(); }, null, this);
+        (_s, pr) => { this._hitEmperor(pr._damage || 1, this._projOpts(pr)); pr.destroy(); }, null, this);
       this._guardTimer = EMPEROR.guardFirstMs;
     }
 
@@ -2701,7 +2701,7 @@ class GameScene extends Phaser.Scene {
       this.physics.add.collider(this.player.sprite, z.sprite);
       this.physics.add.overlap(z.sprite, this.elementProjectiles,
         (_s, pr) => { this._hitZombie(z, pr._damage || 1, pr.x,
-            { knockback: pr._knockback || 0, burn: pr._burn }); pr.destroy(); },
+            this._projOpts(pr)); pr.destroy(); },
         null, this);
       this.zombies.push(z);
     }
@@ -2722,7 +2722,7 @@ class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.player.sprite, g.sprite);
     this.physics.add.overlap(g.sprite, this.elementProjectiles,
       (_s, pr) => { this._hitGuard(g, pr._damage || 1, pr.x,
-            { knockback: pr._knockback || 0, burn: pr._burn }); pr.destroy(); },
+            this._projOpts(pr)); pr.destroy(); },
       null, this);
     this.guards.push(g);
     this._guardTimer = EMPEROR.guardEveryMs;
@@ -2833,14 +2833,19 @@ class GameScene extends Phaser.Scene {
 
   // Applies one status at one tier.  A lower tier is ignored outright —
   // it can't downgrade an active effect and can't refresh its timer.
-  _applyEffect(e, kind, tier) {
+  // `mul` is the wearer's effect multiplier (the gold skin's 2x), applied
+  // on top of whatever the tier says — tiers describe what an effect is,
+  // multipliers scale it.  It stretches duration, never tick damage, so
+  // doubling an effect can't outpace its own tier table.
+  _applyEffect(e, kind, tier, mul = 1) {
     if (!e || e.dead || !tier) return;
     const def = (EFFECT_TIERS[kind] || [])[tier];
     if (!def) return;
     switch (kind) {
       case 'burn':
         if (e.burn && e.burn.tier > tier) return;
-        e.burn = { tier, dmgPerTick: def.dmgPerTick, ticksLeft: def.ticks,
+        e.burn = { tier, dmgPerTick: def.dmgPerTick,
+                   ticksLeft: Math.round(def.ticks * mul),
                    msLeft: BURN_TICK_MS };
         break;
       case 'poison': {
@@ -2850,12 +2855,13 @@ class GameScene extends Phaser.Scene {
         const stacks = e.poison
           ? Math.min(POISON_MAX_STACKS, e.poison.stacks + 1) : 1;
         e.poison = { tier, stacks, tickMs: def.tickMs,
-                     msLeft: def.tickMs, msTotal: def.ms };
+                     msLeft: def.tickMs, msTotal: Math.round(def.ms * mul) };
         break;
       }
       case 'freeze':
         if (e.frozen && e.frozen.tier > tier) return;
-        e.frozen = { tier, msLeft: def.ms, shatter: def.shatter };
+        e.frozen = { tier, msLeft: Math.round(def.ms * mul),
+                     shatter: def.shatter };
         // Freeze is a hard interrupt: a wind-up in progress is thrown
         // away.  Stun deliberately isn't — it resumes where it left off.
         if (e.state === 'windup' || e.state === 'attack') {
@@ -2865,18 +2871,27 @@ class GameScene extends Phaser.Scene {
         break;
       case 'stun':
         if (e.stunned && e.stunned.tier > tier) return;
-        e.stunned = { tier, msLeft: def.ms };
+        e.stunned = { tier, msLeft: Math.round(def.ms * mul) };
         break;
     }
+  }
+
+  // Everything a projectile carries into a hit.  Built in one place so a
+  // new status doesn't mean editing five collision handlers.
+  _projOpts(pr) {
+    return { knockback: pr._knockback || 0, effectMul: pr._effMul || 1,
+             burn: pr._burn, poison: pr._poison,
+             freeze: pr._freeze, stun: pr._stun };
   }
 
   // Everything an element's `opts` can inflict, in one place so the three
   // _hit* methods stay identical in what they support.
   _applyHitEffects(e, opts) {
-    if (opts.burn)   this._applyEffect(e, 'burn',   opts.burn);
-    if (opts.poison) this._applyEffect(e, 'poison', opts.poison);
-    if (opts.freeze) this._applyEffect(e, 'freeze', opts.freeze);
-    if (opts.stun)   this._applyEffect(e, 'stun',   opts.stun);
+    const mul = opts.effectMul || 1;
+    if (opts.burn)   this._applyEffect(e, 'burn',   opts.burn,   mul);
+    if (opts.poison) this._applyEffect(e, 'poison', opts.poison, mul);
+    if (opts.freeze) this._applyEffect(e, 'freeze', opts.freeze, mul);
+    if (opts.stun)   this._applyEffect(e, 'stun',   opts.stun,   mul);
   }
 
   // A frozen target takes its tier's multiplier on the hit that breaks
@@ -4014,11 +4029,9 @@ class GameScene extends Phaser.Scene {
       rd.sprite.body.setVelocityX(pr._dir * pr._knockback);
       this.time.delayedCall(200, () => { if (rd.sprite?.active) rd.sprite.body.setVelocityX(0); });
     }
-    // Fire applies a burn DOT — refreshes rather than stacks on repeat hits.
-    if (pr._burn) {
-      rd.burn = { ticksLeft: pr._burn.ticks, dmgPerTick: pr._burn.dmgPerTick,
-                  tickMs: pr._burn.tickMs, msLeft: pr._burn.tickMs };
-    }
+    // Same status pipeline as every other enemy — dummies just show a
+    // flame beside their healthbar instead of a badge row.
+    this._applyHitEffects(rd, this._projOpts(pr));
     this._damageRangedDummy(rd, dmg);
   }
 
@@ -4090,7 +4103,13 @@ class GameScene extends Phaser.Scene {
     pr._maxX = startX + dir * def.range * 32;
     pr._burstColors = def.burst;
     if (def.knockback) pr._knockback = def.knockback * effMul;
-    if (def.burn) pr._burn = { ...def.burn, ticks: Math.round(def.burn.ticks * effMul) };
+    // Statuses travel as a tier number; the multiplier rides alongside so
+    // the tier table stays the single source of truth for what each does.
+    pr._effMul = effMul;
+    if (def.burn)   pr._burn   = def.burn;
+    if (def.poison) pr._poison = def.poison;
+    if (def.freeze) pr._freeze = def.freeze;
+    if (def.stun)   pr._stun   = def.stun;
     // Crop the hitbox to the painted pixels.  Each element's art fills
     // only part of its 32x32 frame, so the default full-frame body would
     // burst the shot well before it visually touches anything now that
@@ -4326,11 +4345,16 @@ class GameScene extends Phaser.Scene {
       const REST = { x: 4, y: 7, a: 30 };
       const POSE = {
         idle:          [REST],
+        // Measured off walk.png rather than eyeballed: the sword hand
+        // sits at exactly the idle position in frames 0, 1 and 3, and
+        // only swings on frame 2 — forward 1.8px and up 0.9px.  The old
+        // table bobbed on 1 and 3 and held still on 2, which is why the
+        // hilt drifted off the hand while walking but looked right idle.
         walk:          [
           REST,
-          { x: 5, y: 6, a: 25 },
           REST,
-          { x: 3, y: 8, a: 35 },
+          { x: 6, y: 6, a: 30 },
+          REST,
         ],
         jump:          [
           { x: 5, y:  6, a: 20 },
