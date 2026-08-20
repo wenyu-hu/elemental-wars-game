@@ -5882,6 +5882,7 @@ class HUDScene extends Phaser.Scene {
       }
     }
     this._updateBossStatusIcons(showBoss ? boss : null);
+    if (this._actionBtns) this._refreshActionIcons();
 
     // XP bar + level
     this.xpFill.displayWidth = (gs._xp / gs._xpToNext) * this._BAR_W;
@@ -5933,8 +5934,11 @@ class HUDScene extends Phaser.Scene {
     // Pressing sets the virtual twin of a key; releasing clears it.
     // pointerupoutside matters — a thumb that slides off the button
     // would otherwise leave the key stuck down.
-    const makeBtn = (x, y, label, keyName, fontSize = 26) => {
-      const circle = this.add.circle(x, y, R, 0x1e2340, 0.42)
+    // keyName may be null for a button whose action doesn't exist yet —
+    // it still lights up on press so the layout can be felt out, it just
+    // doesn't drive anything.
+    const makeBtn = (x, y, label, keyName, fontSize = 26, radius = R) => {
+      const circle = this.add.circle(x, y, radius, 0x1e2340, 0.42)
         .setStrokeStyle(3, 0xffffff, 0.5)
         .setInteractive({ useHandCursor: true });
       const txt = this.add.text(x, y, label, {
@@ -5943,11 +5947,11 @@ class HUDScene extends Phaser.Scene {
       }).setOrigin(0.5).setAlpha(0.85);
 
       const press   = () => {
-        if (gs && gs.virtualKeys) gs.virtualKeys[keyName] = true;
+        if (keyName && gs && gs.virtualKeys) gs.virtualKeys[keyName] = true;
         circle.setFillStyle(0x3b9fff, 0.65);
       };
       const release = () => {
-        if (gs && gs.virtualKeys) gs.virtualKeys[keyName] = false;
+        if (keyName && gs && gs.virtualKeys) gs.virtualKeys[keyName] = false;
         circle.setFillStyle(0x1e2340, 0.42);
       };
       circle.on('pointerdown', press);
@@ -5956,21 +5960,96 @@ class HUDScene extends Phaser.Scene {
       circle.on('pointerout', release);
 
       this._touchBtns.push(circle, txt);
+      circle._label = txt;
       return circle;
     };
 
     // These only ever show alongside the enlarged touch HUD, whose XP bar
     // top edge sits at y=370 — so a 56px button centred at 320 reaches
     // 348, leaving 22px of air, and the joystick's base clears it by 24.
-    const rowY = 320, upY = 248;
     // Left thumb: a joystick (see _buildJoystick).
     this._buildJoystick(96, 292);
-    // Right thumb: jump, attack, block.
-    makeBtn(W - 52,  rowY, '▲', 'up');
-    makeBtn(W - 132, rowY, '⚔', 'e', 24);
-    makeBtn(W - 92,  upY,  '🛡', 't', 22);
+    // Right thumb: the action cluster.
+    this._buildActionCluster(makeBtn);
 
     this._applyTouchControlVisibility();
+  }
+
+  // Five actions fanned around an oversized jump button.  Jump sits
+  // lower-left of the cluster because in a landscape grip the thumb
+  // pivots at the corner but *rests* up and inward from it, so that's
+  // the easiest spot to reach, not the corner itself.  The remaining
+  // four sit on a 96px arc, ordered by how urgently they're needed:
+  // defence nearest (blocking is reactive), artifact furthest.
+  //
+  // Every button but jump and melee is hidden unless something is
+  // equipped in its slot, so an early-game player sees two buttons and
+  // the cluster fills out as they gear up.
+  _buildActionCluster(makeBtn) {
+    // x, y, r, virtual key, and which equipment slot supplies the icon.
+    const SPEC = [
+      { id: 'jump',     x: 651, y: 305, r: 42, vk: 'up', label: '\u25B2', fs: 32 },
+      { id: 'artifact', x: 626, y: 212, r: 33, slot: 'artifact'     },
+      { id: 'ranged',   x: 710, y: 229, r: 33, slot: 'rangedWeapon' },
+      { id: 'defence',  x: 747, y: 297, r: 33, slot: 'defence', vk: 't' },
+      // Melee always shows: bare fists are still an attack.
+      { id: 'melee',    x: 722, y: 369, r: 33, slot: 'meleeWeapon', vk: 'e', always: true },
+    ];
+
+    this._actionBtns = SPEC.map(def => {
+      const circle = makeBtn(def.x, def.y, def.label || '', def.vk || null,
+                             def.fs || 22, def.r);
+      // Icon sits above the circle; swapped out when gear changes.
+      const icon = def.slot
+        ? this.add.image(def.x, def.y, '__missing').setVisible(false)
+        : null;
+      if (icon) this._touchBtns.push(icon);
+      return { ...def, circle, icon, textObj: circle._label, shownItem: undefined };
+    });
+    this._refreshActionIcons();
+  }
+
+  // Repoints each slot-backed button at whatever is equipped now.  Cheap
+  // to call every frame: it only touches a button whose item changed.
+  _refreshActionIcons() {
+    const st = window.statusSheet && window.statusSheet.getState();
+    const equipment = (st && st.equipment) || {};
+    const showAll = touchControlsOn();
+
+    for (const b of this._actionBtns || []) {
+      if (!b.slot) continue;
+      const slotted = equipment[b.slot] && equipment[b.slot].itemId;
+      // Bare fists for an unarmed melee slot; nothing at all for the rest.
+      const wanted = slotted || (b.always ? '__fist__' : null);
+      if (wanted === b.shownItem) continue;
+      b.shownItem = wanted;
+
+      const visible = showAll && !!wanted;
+      b.circle.setVisible(visible);
+      if (b.textObj) b.textObj.setVisible(visible);
+      b.icon.setVisible(visible);
+      if (!wanted) continue;
+
+      if (wanted === '__fist__') {
+        // Frame 3 of the unarmed attack sheet — the punch at full reach.
+        b.icon.setTexture('player_attack', 3);
+      } else if (this.textures.exists('item_' + wanted)) {
+        b.icon.setTexture('item_' + wanted);
+      } else {
+        b.icon.setVisible(false);
+        continue;
+      }
+      // Fit the art inside the circle whatever its native size is.  The
+      // largest square that fits is r*sqrt(2); 1.3 leaves a little margin
+      // so a diagonal sword's corners don't poke past the ring.
+      const src = b.icon.frame;
+      const fit = b.r * 1.3;
+      b.icon.setDisplaySize(
+        ...(src.width / src.height > 1
+          ? [fit, fit * src.height / src.width]
+          : [fit * src.width / src.height, fit]));
+      b.icon.setFlipX(true);   // sheet art faces left; the player faces right
+    }
   }
 
   // Left-thumb joystick.  Angles are degrees clockwise from straight up,
@@ -6056,6 +6135,12 @@ class HUDScene extends Phaser.Scene {
   _applyTouchControlVisibility() {
     const show = touchControlsOn();
     (this._touchBtns || []).forEach(o => o.setVisible(show));
+    // The blanket pass above would light up empty gear slots, so let the
+    // icon refresh have the final say on those.
+    if (this._actionBtns) {
+      this._actionBtns.forEach(b => { b.shownItem = undefined; });
+      this._refreshActionIcons();
+    }
     // Clear anything stuck down when they're switched off mid-press, and
     // put the knob back so it isn't left deflected on the next show.
     const gs = this._gs;
