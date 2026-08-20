@@ -3739,13 +3739,24 @@ class GameScene extends Phaser.Scene {
           lines: ['Press ↓ or S to duck', 'and slip under spikes'] },
         // Floor drop area — by the second ranged dummy (tile 46)
         { x: 44 * TS, lines: ['Hold T or / to block', 'and reduce incoming damage'] },
+        // Secret star — floats 160px above it, the same gap level 1's
+        // star sign uses.  Explicit y because the star hangs in the air
+        // rather than sitting on a surface.
+        { x: 1500, y: 640, lines: [
+          'Stars only save if you get',
+          'to a checkpoint after',
+          'getting them!',
+        ] },
       ],
     };
     const defs = defsByLevel[this._levelNum] || [];
     const topSurface = groundTop - 4 * TS;   // level-2 elevated platform surface
 
-    this._instructionBoxes = defs.map(({ x, lines, topLevel }) => {
-      const boxYThis = (topLevel ? topSurface : groundTop) - 240;
+    this._instructionBoxes = defs.map(({ x, y, lines, topLevel }) => {
+      // Signs normally hang a fixed height above whichever surface they
+      // belong to; `y` overrides that for ones pinned to a floating
+      // object rather than to the ground.
+      const boxYThis = (y != null) ? y : (topLevel ? topSurface : groundTop) - 240;
       // Size the box to the text
       const lineCount = lines.length;
       const boxH = lineCount * (FONT + LS) + PAD * 2 - LS;
