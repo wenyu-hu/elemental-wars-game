@@ -3926,6 +3926,7 @@ class GameScene extends Phaser.Scene {
     this._checkDummyProximity();
     this._checkPatrolDummyProximity();
     this._updateElements(delta);
+    this._updateBlockInput();
     this._updateLevel2(delta);
     this._updateZombies(delta);
     this._updateFoodDrops();
@@ -4007,13 +4008,6 @@ class GameScene extends Phaser.Scene {
       this._riderOnMP = false;
       mp._prevX = mp.x;
     }
-
-    // ── Block input (T or '/' ) ──────────────────────────────────
-    // Gated on owning a shield, so the guard visual and the damage
-    // reduction in _onPlayerHitByFireball both stay off without one.
-    const k = this.keys;
-    this._blocking = !!(k && (k.t.isDown || k.slash.isDown)) && this._isShielded();
-    this._updateShieldOverlay();
   }
 
   // Spawn a Blue_Fireball travelling straight left or right toward
@@ -4177,6 +4171,17 @@ class GameScene extends Phaser.Scene {
     return Math.max(0, Number(item?.stats?.defenceLevel) || 0);
   }
 
+  // Block state, updated on every level.  This used to live inside
+  // _updateLevel2, which returns early unless _levelNum === 2 — so
+  // outside the tutorial the stance animation played but _blocking never
+  // became true, leaving the shield invisible and the damage reduction
+  // switched off.  Gated on owning a shield, so both stay off without one.
+  _updateBlockInput() {
+    const k = this.keys;
+    this._blocking = !!(k && (k.t.isDown || k.slash.isDown)) && this._isShielded();
+    this._updateShieldOverlay();
+  }
+
   // Floats a shield image on the player's free hand while blocking.
   _updateShieldOverlay() {
     if (!this.player) return;
@@ -4190,11 +4195,11 @@ class GameScene extends Phaser.Scene {
     if (!show) return;
     const s = this.player.sprite;
     const dir = s.flipX ? 1 : -1;   // facing/forward direction
-    // Cover the extended lead hand + forearm: shifted forward to the
-    // fist, at arm height, enlarged a touch so it shrouds the arm.  Sits
-    // above the player so it hides the hand.
-    this._shieldOverlay.setScale(SCALE * 1.05);
-    this._shieldOverlay.setPosition(s.x + dir * 16, s.y + 8);
+    // Sits on the extended lead hand, at arm height, above the player so
+    // it covers the fist.  Scale is deliberately under 1x SCALE — at 1.05
+    // it read as a tower shield against a 54x93 player.
+    this._shieldOverlay.setScale(SCALE * 0.75);
+    this._shieldOverlay.setPosition(s.x + dir * 14, s.y + 8);
     this._shieldOverlay.setFlipX(dir < 0);
     this._shieldOverlay.setDepth(s.depth + 2);
   }
