@@ -5942,10 +5942,8 @@ class HUDScene extends Phaser.Scene {
     // Kept clear of the XP bar's top edge at y=394: a 56px button centred
     // at 340 reaches 368, leaving 26px of air.
     const rowY = 340, upY = 268;
-    // Left thumb: move and duck.
-    makeBtn(52,      rowY, '◀', 'left');
-    makeBtn(132,     rowY, '▶', 'right');
-    makeBtn(92,      upY,  '▼', 'down');
+    // Left thumb: a joystick (see _buildJoystick).
+    this._buildJoystick(96, 312);
     // Right thumb: jump, attack, block.
     makeBtn(W - 52,  rowY, '▲', 'up');
     makeBtn(W - 132, rowY, '⚔', 'e', 24);
@@ -5954,13 +5952,92 @@ class HUDScene extends Phaser.Scene {
     this._applyTouchControlVisibility();
   }
 
+  // Left-thumb joystick.  Angles are degrees clockwise from straight up,
+  // so 90 is right, 180 is down, 270 is left.
+  //
+  //        315 ─── 0 ─── 45      up: ignored (jump is a right-hand button)
+  //         │              │
+  //        270            90     left / right: walk
+  //         │              │
+  //        225 ── 180 ── 135     duck band
+  //
+  // Inside the duck band the player also walks, at the 40% duck speed the
+  // existing duck branch already applies — except in the narrow band
+  // either side of straight down, which is a stationary duck.  Nothing
+  // latches: the keys track the stick's live angle, so the player stays
+  // ducked for exactly as long as the thumb stays in the band.
+  _buildJoystick(cx, cy) {
+    const gs = this._gs;
+    const BASE_R = 54, KNOB_R = 24;
+    const DEAD   = 0.22;            // fraction of BASE_R that reads as centred
+    const DUCK_MIN = 135, DUCK_MAX = 225;   // walk + duck
+    const PURE_MIN = 165, PURE_MAX = 195;   // duck, no walk
+
+    const base = this.add.circle(cx, cy, BASE_R, 0x1e2340, 0.34)
+      .setStrokeStyle(3, 0xffffff, 0.45)
+      .setInteractive({ useHandCursor: true });
+    const knob = this.add.circle(cx, cy, KNOB_R, 0xffffff, 0.55)
+      .setStrokeStyle(3, 0x1e2340, 0.7);
+    this._touchBtns.push(base, knob);
+
+    const setKeys = (left, right, down) => {
+      if (!gs || !gs.virtualKeys) return;
+      gs.virtualKeys.left  = left;
+      gs.virtualKeys.right = right;
+      gs.virtualKeys.down  = down;
+    };
+    const recentre = () => { knob.setPosition(cx, cy); setKeys(false, false, false); };
+
+    const update = (pointer) => {
+      const dx = pointer.x - cx, dy = pointer.y - cy;
+      const dist = Math.hypot(dx, dy);
+      // Knob follows the thumb but stays inside the base.
+      const clamped = Math.min(dist, BASE_R);
+      if (dist > 0) knob.setPosition(cx + dx / dist * clamped, cy + dy / dist * clamped);
+      else knob.setPosition(cx, cy);
+
+      if (dist < BASE_R * DEAD) { setKeys(false, false, false); return; }
+
+      // atan2(dx, -dy) puts 0 at the top and grows clockwise.
+      let ang = Math.atan2(dx, -dy) * 180 / Math.PI;
+      if (ang < 0) ang += 360;
+
+      if (ang >= DUCK_MIN && ang <= DUCK_MAX) {
+        const stationary = ang >= PURE_MIN && ang <= PURE_MAX;
+        // Past straight down leans left, before it leans right.
+        setKeys(!stationary && ang > PURE_MAX, !stationary && ang < PURE_MIN, true);
+      } else if (ang > DUCK_MAX && ang < 360 - 45) {
+        setKeys(true, false, false);                    // 225-315: left
+      } else if (ang > 45 && ang < DUCK_MIN) {
+        setKeys(false, true, false);                    // 45-135: right
+      } else {
+        setKeys(false, false, false);                   // 315-45: up, ignored
+      }
+    };
+
+    // Track only the pointer that grabbed the stick, so the other thumb
+    // working the action buttons can't drag it.
+    let owner = null;
+    base.on('pointerdown', (p) => { owner = p.id; update(p); });
+    this.input.on('pointermove', (p) => { if (p.id === owner) update(p); });
+    const drop = (p) => { if (p.id === owner) { owner = null; recentre(); } };
+    this.input.on('pointerup', drop);
+    this.input.on('pointerupoutside', drop);
+
+    this._joystickRecentre = recentre;
+  }
+
   _applyTouchControlVisibility() {
     const show = touchControlsOn();
     (this._touchBtns || []).forEach(o => o.setVisible(show));
-    // Clear anything stuck down when they're switched off mid-press.
+    // Clear anything stuck down when they're switched off mid-press, and
+    // put the knob back so it isn't left deflected on the next show.
     const gs = this._gs;
-    if (!show && gs && gs.virtualKeys) {
-      Object.keys(gs.virtualKeys).forEach(k => { gs.virtualKeys[k] = false; });
+    if (!show) {
+      if (this._joystickRecentre) this._joystickRecentre();
+      if (gs && gs.virtualKeys) {
+        Object.keys(gs.virtualKeys).forEach(k => { gs.virtualKeys[k] = false; });
+      }
     }
   }
 
