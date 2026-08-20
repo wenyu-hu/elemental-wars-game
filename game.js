@@ -1726,6 +1726,12 @@ class GameScene extends Phaser.Scene {
       this.player.sprite, this.fireballs,
       (_p, fb) => this._onPlayerHitByFireball(fb), null, this
     );
+    // Shots annihilate each other in mid-air.  Both palettes burst at the
+    // point of contact, so you can see which two shots traded.
+    this.physics.add.overlap(
+      this.fireballs, this.elementProjectiles,
+      (a, b) => this._onShotsCollide(a, b), null, this
+    );
     // Player element shots damage ranged dummies
     this.rangedDummies.forEach(rd => {
       this.physics.add.overlap(
@@ -3921,7 +3927,12 @@ class GameScene extends Phaser.Scene {
     fb.setScale(SCALE);
     fb.body.setAllowGravity(false);
     fb.setFlipX(dir < 0);
-    fb.body.setSize(20, 16).setOffset(6, 8);
+    // Crop to the painted pixels like every other shot.  The art is only
+    // 16x7 inside its 32x32 frame, so the old hand-written 20x16 body was
+    // more than twice the visual height — fireballs connected while
+    // visibly passing above or below.  The bbox is horizontally centred,
+    // so flipX needs no mirrored offset here.
+    this._fitBodyToTexture(fb, { frame: 0 });
     fb.body.setVelocityX(dir * 160);   // 0.8× the player's 200px/s run speed
     fb._damage = 5;
     // Two-frame loop animation
@@ -3997,6 +4008,22 @@ class GameScene extends Phaser.Scene {
 
   _explodeFireball(x, y) {
     this._burstPixels(x, y, [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd]);
+  }
+
+  // A player shot and an enemy fireball met in mid-air: both die, and
+  // both burst at the point of contact so the trade reads as one event
+  // in two colours rather than two explosions in different places.
+  // Phaser doesn't promise argument order across groups, so work out
+  // which is which rather than assuming.
+  _onShotsCollide(a, b) {
+    const pr = this.elementProjectiles.contains(a) ? a : b;
+    const fb = (pr === a) ? b : a;
+    if (!pr || !fb || !pr.active || !fb.active) return;
+    const mx = (pr.x + fb.x) / 2, my = (pr.y + fb.y) / 2;
+    this._burstPixels(mx, my, pr._burstColors || [0xffffff]);
+    this._explodeFireball(mx, my);
+    pr.destroy();
+    fb.destroy();
   }
 
   _burstPixels(x, y, colors) {
