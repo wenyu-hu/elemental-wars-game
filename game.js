@@ -160,6 +160,13 @@ const EFFECT_TIERS = {
 const POISON_MAX_STACKS = 3;
 const BURN_TICK_MS      = 1000;
 
+// Badge key -> the field it lives on, so the icon row can read a tier
+// back off the enemy without a switch.
+const STATUS_FIELD = { burning: 'burn', poisoned: 'poison',
+                       frozen: 'frozen', stunned: 'stunned' };
+// Index by tier, so ROMAN[3] is 'III'.
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
+
 // Reads whichever status flags an enemy is carrying.  Kept in one place
 // so adding a status means touching this and the sheet, nothing else.
 function activeStatuses(e) {
@@ -2050,7 +2057,8 @@ class GameScene extends Phaser.Scene {
       return;
     }
     this._applyHitEffects(z, opts);
-    if (opts.dot || wasFrozen) return;
+    // Neither of these plays the red knockback frame, so flash instead.
+    if (opts.dot || wasFrozen) { this._flashHit(z); return; }
     z.state = 'knockback';
     z.timer = cfg.knockbackMs;
     s.anims.play(cfg.anim + '_knockback', true);
@@ -2220,9 +2228,9 @@ class GameScene extends Phaser.Scene {
       return;
     }
     this._applyHitEffects(g, opts);
+    // Flashes on every hit, DOT ticks and shatters included.
+    this._flashHit(g);
     if (opts.dot || wasFrozen) return;
-    s.setTintFill(0xffffff);
-    this.time.delayedCall(80, () => { if (!g.dead) s.clearTint(); });
     g.state = 'knockback';
     g.timer = GUARD.knockbackMs;
     // Armour blunts every shove, melee or elemental, by half.
@@ -2900,6 +2908,16 @@ class GameScene extends Phaser.Scene {
     if (opts.stun)   this._applyEffect(e, 'stun',   opts.stun,   mul);
   }
 
+  // White flash for hits that play no knockback frame — burn and poison
+  // ticks, and the shatter hit on a frozen target.  Without it those land
+  // with no feedback at all and read as nothing happening.
+  _flashHit(e) {
+    const s = e && e.sprite;
+    if (!s || !s.active) return;
+    s.setTintFill(0xffffff);
+    this.time.delayedCall(80, () => { if (!e.dead && s.active) s.clearTint(); });
+  }
+
   // A frozen target takes its tier's multiplier on the hit that breaks
   // the freeze, and thaws.  DOT ticks don't shatter — only a real hit.
   _shatter(e, dmg, opts) {
@@ -2950,24 +2968,39 @@ class GameScene extends Phaser.Scene {
   // has no bar, so badges sit in a row above the sprite.  Several can be
   // active at once, so they lay out side by side rather than stacking.
   _updateStatusIcons() {
-    const BADGE = 22, GAP = 3;
+    const BADGE = 32, GAP = 4;
     const mark = (e) => {
       if (!e || !e.sprite) return;
       const live = !e.dead && e.sprite.active;
       const keys = live ? activeStatuses(e) : [];
       e.statusIcons = e.statusIcons || [];
       // Grow or shrink the badge row to match what's actually active.
-      while (e.statusIcons.length > keys.length) e.statusIcons.pop().destroy();
+      while (e.statusIcons.length > keys.length) {
+        const b = e.statusIcons.pop();
+        b.img.destroy();
+        b.tier.destroy();
+      }
       while (e.statusIcons.length < keys.length) {
-        e.statusIcons.push(this.add.image(0, 0, 'effect_icons', 0)
-          .setDisplaySize(BADGE, BADGE).setDepth(16));
+        e.statusIcons.push({
+          img: this.add.image(0, 0, 'effect_icons', 0)
+            .setDisplaySize(BADGE, BADGE).setDepth(16),
+          // Numeral hangs off the badge's bottom-right corner rather than
+          // sitting inside it, so it never covers the icon art.
+          tier: this.add.text(0, 0, '', {
+            fontSize: '14px', fontFamily: '"Arial Black", Arial, sans-serif',
+            color: '#ffffff', stroke: '#000000', strokeThickness: 4,
+          }).setOrigin(1, 1).setDepth(17),
+        });
       }
       const rowW = keys.length * BADGE + (keys.length - 1) * GAP;
-      const top  = e.sprite.y - e.sprite.displayHeight / 2 - 14;
+      const top  = e.sprite.y - e.sprite.displayHeight / 2 - 18;
       keys.forEach((k, i) => {
-        e.statusIcons[i]
-          .setFrame(EFFECT_ICON_FRAME[k])
-          .setPosition(e.sprite.x - rowW / 2 + BADGE / 2 + i * (BADGE + GAP), top);
+        const b  = e.statusIcons[i];
+        const cx = e.sprite.x - rowW / 2 + BADGE / 2 + i * (BADGE + GAP);
+        b.img.setFrame(EFFECT_ICON_FRAME[k]).setPosition(cx, top);
+        const st = e[STATUS_FIELD[k]];
+        b.tier.setText(ROMAN[st && st.tier] || '')
+              .setPosition(cx + BADGE / 2 + 3, top + BADGE / 2 + 3);
       });
     };
     (this.zombies || []).forEach(mark);
@@ -2979,6 +3012,7 @@ class GameScene extends Phaser.Scene {
   // element hits and burn ticks.
   _damageRangedDummy(rd, dmg) {
     if (rd.dead) return;
+    this._flashHit(rd);
     rd.hp = Math.max(0, rd.hp - dmg);
     if (rd.hp <= 0) {
       rd.dead = true;
