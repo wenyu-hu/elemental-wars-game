@@ -2,13 +2,37 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- maximum-scale + user-scalable=no stop a double-tap or pinch from
+       zooming the canvas mid-game; viewport-fit=cover lets the safe-area
+       insets below push the HUD clear of a notch or home bar. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Elemental Wars</title>
-  <link rel="stylesheet" href="style.css" />
-  <link rel="stylesheet" href="status-sheet.css" />
+  <script>
+    // Cache-bust the stylesheets the same way the scripts below are.
+    // Without this the dev server happily serves a stale style.css while
+    // the JS is fresh, which reads as "my CSS change didn't work".
+    // Injected from <head> so it still applies before first paint.
+    (function () {
+      const v = String(Date.now());
+      ['style.css', 'status-sheet.css'].forEach(href => {
+        const l = document.createElement('link');
+        l.rel = 'stylesheet';
+        l.href = href + '?v=' + v;
+        document.head.appendChild(l);
+      });
+    })();
+  </script>
 </head>
 <body>
   <div id="game-container"></div>
+  <div id="rotate-prompt">
+    <div class="rp-icon">📱</div>
+    <div class="rp-title">Turn your device sideways</div>
+    <div class="rp-sub">Elemental Wars is played in landscape.</div>
+  </div>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
   <script>
     // Cache-bust local sources so the dev server's no-cache-headers

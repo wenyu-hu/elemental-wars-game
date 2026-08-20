@@ -7,6 +7,48 @@
 body {
   background: #eef8ff;   /* matches game sky — letterbox is invisible */
   overflow: hidden;
+  /* Stop the browser claiming touches for scroll/zoom gestures, and kill
+     the tap-highlight flash and long-press callout on the canvas. */
+  touch-action: none;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+           env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* Portrait phones letterbox the 800x480 game down to ~28% of the screen,
+   which isn't playable — ask for landscape instead.  Height cap keeps
+   this off desktop windows that merely happen to be tall. */
+#rotate-prompt { display: none; }
+@media (orientation: portrait) and (max-height: 900px) and (pointer: coarse) {
+  #game-container { display: none; }
+  #rotate-prompt {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    background: #eef8ff;
+    color: #2d6a4f;
+    font-family: "Arial Black", Arial, sans-serif;
+    text-align: center;
+    padding: 24px;
+  }
+  #rotate-prompt .rp-icon {
+    font-size: 64px;
+    animation: rp-tilt 1.8s ease-in-out infinite;
+  }
+  #rotate-prompt .rp-title { font-size: 22px; color: #ff5722; }
+  #rotate-prompt .rp-sub   { font-size: 14px; font-family: Arial, sans-serif; }
+}
+@keyframes rp-tilt {
+  0%, 100% { transform: rotate(0deg); }
+  50%      { transform: rotate(-90deg); }
 }
 
 /* Phaser FIT mode centres the canvas automatically via inline style.

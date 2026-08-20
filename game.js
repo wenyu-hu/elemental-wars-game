@@ -388,6 +388,32 @@ const EFFECT_TONE = {
   bad:     '#c62828',   // a drawback
   neutral: '#5c5c66',   // flavour, or a statement with no value attached
 };
+// ─────────────────────────────────────────────
+//  Touch controls
+// ─────────────────────────────────────────────
+// A device setting, not player progress — so it's stored under its own
+// key and applies to guests too (progress deliberately never touches
+// localStorage for guests; this isn't progress).
+const TOUCH_PREF_KEY = 'ew.touchControls';   // 'auto' | 'on' | 'off'
+
+function touchPref() {
+  try { return localStorage.getItem(TOUCH_PREF_KEY) || 'auto'; }
+  catch { return 'auto'; }
+}
+function setTouchPref(v) {
+  try { localStorage.setItem(TOUCH_PREF_KEY, v); } catch { /* private mode */ }
+}
+// Coarse pointer *and* real touch points — either alone gives false
+// positives (some laptops report touch; some styluses report coarse).
+function deviceIsTouch() {
+  const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  return !!(coarse && navigator.maxTouchPoints > 0);
+}
+function touchControlsOn() {
+  const p = touchPref();
+  return p === 'on' ? true : p === 'off' ? false : deviceIsTouch();
+}
+
 const SKINS = [
   // `key` is what gets persisted in save data — only `label` is display
   // text, so these can be renamed freely without breaking saves.
@@ -1351,6 +1377,25 @@ class GameScene extends Phaser.Scene {
       seven: Phaser.Input.Keyboard.KeyCodes.SEVEN,
       eight: Phaser.Input.Keyboard.KeyCodes.EIGHT,
     });
+    // On-screen controls press these.  Each wrapped key reads as down if
+    // either the physical key or its virtual twin is held, so every
+    // existing `k.left.isDown` site keeps working untouched.
+    //
+    // Only movement/action keys are wrapped: the number keys stay real
+    // Key objects because JustDown() needs them, and the element slots
+    // already fire from their own pointerup handlers anyway.
+    this.virtualKeys = {};
+    for (const name of ['left', 'right', 'up', 'down', 'e', 't']) {
+      const real = this.keys[name];
+      if (!real) continue;
+      this.virtualKeys[name] = false;
+      const virt = this.virtualKeys;
+      this.keys[name] = { get isDown() { return real.isDown || virt[name]; } };
+    }
+    // Phaser tracks one pointer by default, so holding a direction and
+    // tapping jump would drop one of them.  Four covers both thumbs.
+    this.input.addPointer(3);
+
     this._jumpHeld = false;
     this._spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this._dummyDialogTriggered       = false;
@@ -5682,6 +5727,8 @@ class HUDScene extends Phaser.Scene {
     // ── Effects placeholder area (right side) ─────
     // (Empty for now — per spec, irrelevant until status effects are added.)
 
+    this._buildTouchControls(W, H);
+
     // ── PAUSED overlay (hidden by default) ────────
     this.pausedText = this.add.text(W / 2, H / 2 - 40, 'PAUSED', {
       fontSize: '48px', fontFamily: '"Arial Black", Arial, sans-serif',
@@ -5697,6 +5744,28 @@ class HUDScene extends Phaser.Scene {
     this.exitBtn.on('pointerover', () => this.exitBtn.setStyle({ backgroundColor: '#e04b39' }));
     this.exitBtn.on('pointerout',  () => this.exitBtn.setStyle({ backgroundColor: '#c0392b' }));
     this.exitBtn.on('pointerup',   () => this._exitToMap());
+
+    // Touch-control toggle — auto-detects by default, but a phone that
+    // reports the wrong pointer type, or a desktop player who wants to
+    // try them, needs a way to force it either way.
+    const labelFor = () => {
+      const p = touchPref();
+      const state = p === 'auto' ? (deviceIsTouch() ? 'Auto (on)' : 'Auto (off)')
+                  : p === 'on'   ? 'On' : 'Off';
+      return `  Touch controls: ${state}  `;
+    };
+    this.touchToggle = this.add.text(W / 2, H / 2 + 84, labelFor(), {
+      fontSize: '15px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', backgroundColor: '#3f4a63', padding: { x: 14, y: 7 },
+    }).setOrigin(0.5).setVisible(false).setInteractive({ useHandCursor: true });
+    this.touchToggle.on('pointerover', () => this.touchToggle.setStyle({ backgroundColor: '#55638a' }));
+    this.touchToggle.on('pointerout',  () => this.touchToggle.setStyle({ backgroundColor: '#3f4a63' }));
+    this.touchToggle.on('pointerup', () => {
+      const next = { auto: 'on', on: 'off', off: 'auto' }[touchPref()];
+      setTouchPref(next);
+      this.touchToggle.setText(labelFor());
+      this._applyTouchControlVisibility();
+    });
   }
 
   // Leaving mid-level: unpause first so the world isn't left frozen for
@@ -5716,6 +5785,7 @@ class HUDScene extends Phaser.Scene {
     this.pauseIcon.setText(paused ? '▶' : '⏸');
     this.pausedText.setVisible(paused);
     this.exitBtn.setVisible(paused);
+    this.touchToggle.setVisible(paused);
   }
 
   _openStatusSheet() {
@@ -5804,6 +5874,7 @@ class HUDScene extends Phaser.Scene {
     if (!paused && this.pauseIcon.text !== '⏸') this.pauseIcon.setText('⏸');
     this.pausedText.setVisible(paused);
     this.exitBtn.setVisible(paused);
+    this.touchToggle.setVisible(paused);
 
     // Hotbar: icon + darken/reload-bar overlay per slot
     if (gs._hotbar) {
@@ -5824,6 +5895,72 @@ class HUDScene extends Phaser.Scene {
           s.reloadBar.setSize(size, size * Phaser.Math.Clamp(frac, 0, 1));
         }
       });
+    }
+  }
+
+  // On-screen movement and action buttons.  The element slots, pause and
+  // inventory buttons already respond to taps through their own pointer
+  // handlers, so these cover only what used to be keyboard-only.
+  //
+  // They sit above the HUD row and hard against the left and right edges,
+  // which is where thumbs land in landscape.  Semi-transparent because
+  // they unavoidably overlay gameplay on a phone.
+  _buildTouchControls(W, H) {
+    const gs = this._gs;
+    this._touchBtns = [];
+    const SIZE = 56, R = SIZE / 2;
+
+    // Pressing sets the virtual twin of a key; releasing clears it.
+    // pointerupoutside matters — a thumb that slides off the button
+    // would otherwise leave the key stuck down.
+    const makeBtn = (x, y, label, keyName, fontSize = 26) => {
+      const circle = this.add.circle(x, y, R, 0x1e2340, 0.42)
+        .setStrokeStyle(3, 0xffffff, 0.5)
+        .setInteractive({ useHandCursor: true });
+      const txt = this.add.text(x, y, label, {
+        fontSize: `${fontSize}px`, fontFamily: 'Arial, sans-serif',
+        color: '#ffffff', stroke: '#000000', strokeThickness: 3,
+      }).setOrigin(0.5).setAlpha(0.85);
+
+      const press   = () => {
+        if (gs && gs.virtualKeys) gs.virtualKeys[keyName] = true;
+        circle.setFillStyle(0x3b9fff, 0.65);
+      };
+      const release = () => {
+        if (gs && gs.virtualKeys) gs.virtualKeys[keyName] = false;
+        circle.setFillStyle(0x1e2340, 0.42);
+      };
+      circle.on('pointerdown', press);
+      circle.on('pointerup', release);
+      circle.on('pointerupoutside', release);
+      circle.on('pointerout', release);
+
+      this._touchBtns.push(circle, txt);
+      return circle;
+    };
+
+    // Kept clear of the XP bar's top edge at y=394: a 56px button centred
+    // at 340 reaches 368, leaving 26px of air.
+    const rowY = 340, upY = 268;
+    // Left thumb: move and duck.
+    makeBtn(52,      rowY, '◀', 'left');
+    makeBtn(132,     rowY, '▶', 'right');
+    makeBtn(92,      upY,  '▼', 'down');
+    // Right thumb: jump, attack, block.
+    makeBtn(W - 52,  rowY, '▲', 'up');
+    makeBtn(W - 132, rowY, '⚔', 'e', 24);
+    makeBtn(W - 92,  upY,  '🛡', 't', 22);
+
+    this._applyTouchControlVisibility();
+  }
+
+  _applyTouchControlVisibility() {
+    const show = touchControlsOn();
+    (this._touchBtns || []).forEach(o => o.setVisible(show));
+    // Clear anything stuck down when they're switched off mid-press.
+    const gs = this._gs;
+    if (!show && gs && gs.virtualKeys) {
+      Object.keys(gs.virtualKeys).forEach(k => { gs.virtualKeys[k] = false; });
     }
   }
 
