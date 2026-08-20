@@ -1989,7 +1989,7 @@ class GameScene extends Phaser.Scene {
           z.cooldown = cfg.cooldownMs;
           const stillClose = Math.abs(ps.x - s.x) <= cfg.attackRange * 1.2
                           && Math.abs(ps.y - s.y) < TS;
-          if (stillClose) this._damagePlayer(cfg.damage);
+          if (stillClose) this._damagePlayer(cfg.damage, s.x);
         }
         continue;
       }
@@ -2261,7 +2261,8 @@ class GameScene extends Phaser.Scene {
   _onPlayerHitByLightning(bolt) {
     if (!bolt || !bolt.active) return;
     // _damagePlayer respects i-frames, so a bolt landing during another
-    // hit's invincibility is absorbed rather than stacking.
+    // hit's invincibility is absorbed rather than stacking.  No fromX:
+    // it drops from overhead, so a side-facing shield shouldn't stop it.
     this._damagePlayer(GUARD.damage);
     bolt.destroy();
   }
@@ -2517,7 +2518,7 @@ class GameScene extends Phaser.Scene {
       if (!bolt.active) return;
       bolt.destroy();
       this._doorBolt = null;
-      this._damagePlayer(DOOR.damage);
+      this._damagePlayer(DOOR.damage, bolt.x);
       this.time.delayedCall(260, () => { this._doorLockout = false; });
     });
     // Safety net: if it somehow misses, don't strand the player.
@@ -4043,31 +4044,42 @@ class GameScene extends Phaser.Scene {
     if (!fb || !fb.active) return;
     const fx = fb.x, fy = fb.y;
     if (this._spikeHit) { this._explodeFireball(fx, fy); fb.destroy(); return; }   // i-frames absorb
-    let dmg = fb._damage || 5;
-    // Blocking is a base stance: it knocks 2 off incoming damage, and
-    // an equipped shield adds its defenceLevel on top (so a shield
-    // fully negates a 3-damage fireball).  Without a shield the player
-    // still takes the chip damage.
-    if (this._blocking) {
-      dmg = Math.max(0, dmg - (2 + this._shieldDefence()));
-    }
+    const dmg = fb._damage || 5;
     this._explodeFireball(fx, fy);
     fb.destroy();
-    if (dmg <= 0) {
-      // Flash white briefly to show a successful block
-      this.player.sprite.setTintFill(0xffffff);
-      this.time.delayedCall(80, () => this.player.sprite.clearTint());
-      return;
-    }
-    this._damagePlayer(dmg);
+    // Reduction and the block flash both live in _damagePlayer now, so
+    // every damage source gets the same treatment.
+    this._damagePlayer(dmg, fx);
   }
 
   // Take `dmg` off the player with the standard hit reaction: red flash,
   // screen shake, and a blink of invincibility (_spikeHit) so a single
   // source can't chain-hit.  Shared by fireballs and zombie strikes.
   // Returns false when i-frames swallowed the hit.
-  _damagePlayer(dmg) {
+  // A raised shield only stops what it faces.  `fromX` is the attack's
+  // origin; pass null for damage with no meaningful side — spikes
+  // underfoot, the Guard's bolt dropping from above, the Emperor's beam —
+  // which upward blocking will cover later.
+  _blockAbsorbs(fromX) {
+    if (fromX == null || !this._blocking) return false;
+    const s = this.player.sprite;
+    const facingRight = !!s.flipX;          // flipX true = facing right
+    return (fromX >= s.x) === facingRight;
+  }
+
+  _damagePlayer(dmg, fromX = null) {
     if (this._spikeHit || dmg <= 0) return false;
+    // Blocking is a base stance worth 2, plus whatever the shield adds.
+    if (this._blockAbsorbs(fromX)) {
+      dmg = Math.max(0, dmg - (2 + this._shieldDefence()));
+      if (dmg <= 0) {
+        // Flash white: the hit was stopped outright.
+        const ps0 = this.player.sprite;
+        ps0.setTintFill(0xffffff);
+        this.time.delayedCall(80, () => ps0.clearTint());
+        return false;
+      }
+    }
     this._hp = Math.max(0, this._hp - dmg);
     if (this._hp <= 0) { this.respawnPlayer(); return true; }
     this._spikeHit = true;
