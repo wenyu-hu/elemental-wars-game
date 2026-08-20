@@ -2968,7 +2968,7 @@ class GameScene extends Phaser.Scene {
   // has no bar, so badges sit in a row above the sprite.  Several can be
   // active at once, so they lay out side by side rather than stacking.
   _updateStatusIcons() {
-    const BADGE = 64, GAP = 6;
+    const BADGE = 32, GAP = 4;
     const mark = (e) => {
       if (!e || !e.sprite) return;
       const live = !e.dead && e.sprite.active;
@@ -2984,29 +2984,29 @@ class GameScene extends Phaser.Scene {
         e.statusIcons.push({
           img: this.add.image(0, 0, 'effect_icons', 0)
             .setDisplaySize(BADGE, BADGE).setDepth(16),
-          // Numeral sits inside the badge's bottom-right corner.  The
-          // heavy stroke is what keeps it readable over the icon art.
+          // Numeral hangs off the badge's bottom-right corner rather than
+          // sitting inside it, so it never covers the icon art.
           tier: this.add.text(0, 0, '', {
-            fontSize: '20px', fontFamily: '"Arial Black", Arial, sans-serif',
-            color: '#ffffff', stroke: '#000000', strokeThickness: 5,
+            fontSize: '14px', fontFamily: '"Arial Black", Arial, sans-serif',
+            color: '#ffffff', stroke: '#000000', strokeThickness: 4,
           }).setOrigin(1, 1).setDepth(17),
         });
       }
       const rowW = keys.length * BADGE + (keys.length - 1) * GAP;
-      // Badge centre, high enough that the taller badges clear the sprite.
-      const top  = e.sprite.y - e.sprite.displayHeight / 2 - 38;
+      const top  = e.sprite.y - e.sprite.displayHeight / 2 - 18;
       keys.forEach((k, i) => {
         const b  = e.statusIcons[i];
         const cx = e.sprite.x - rowW / 2 + BADGE / 2 + i * (BADGE + GAP);
         b.img.setFrame(EFFECT_ICON_FRAME[k]).setPosition(cx, top);
         const st = e[STATUS_FIELD[k]];
         b.tier.setText(ROMAN[st && st.tier] || '')
-              .setPosition(cx + BADGE / 2 - 4, top + BADGE / 2 - 2);
+              .setPosition(cx + BADGE / 2 + 3, top + BADGE / 2 + 3);
       });
     };
     (this.zombies || []).forEach(mark);
     (this.guards  || []).forEach(mark);
-    if (this.emperor) mark(this.emperor);
+    // The Emperor is deliberately absent: his statuses are drawn larger,
+    // under the boss healthbar, by HUDScene._updateBossStatusIcons.
   }
 
   // Apply damage to a ranged dummy and kill it if HP hits 0. Shared by
@@ -5551,6 +5551,12 @@ class HUDScene extends Phaser.Scene {
     this._bossBarObjs = [this.bossLabel, bossBg, this.bossFill, this.bossGhost,
                          bossEdge, this.bossText];
     this._bossBarObjs.forEach(o => o.setVisible(false));
+    // Boss statuses hang under the bar instead of over the sprite, at
+    // double the size the peons use — there's room here, and the boss is
+    // the one fight where knowing the exact tier actually matters.
+    this._BOSS_BADGE = 64;
+    this._BOSS_BADGE_Y = bossY + BOSS_H / 2 + 10 + this._BOSS_BADGE / 2;
+    this._bossStatusIcons = [];
 
     // ── Pause button (yellow) — raised so there's air below it ──
     const btnY = panelY + 50;   // was 65; 15px higher for bottom padding
@@ -5751,6 +5757,7 @@ class HUDScene extends Phaser.Scene {
         this.bossGhost.setVisible(false);
       }
     }
+    this._updateBossStatusIcons(showBoss ? boss : null);
 
     // XP bar + level
     this.xpFill.displayWidth = (gs._xp / gs._xpToNext) * this._BAR_W;
@@ -5784,6 +5791,41 @@ class HUDScene extends Phaser.Scene {
         }
       });
     }
+  }
+
+  // The boss's statuses, drawn under his healthbar rather than over his
+  // sprite.  Same layout as the peons' badge row in GameScene, just at
+  // double the size and anchored to the HUD instead of to a world sprite.
+  _updateBossStatusIcons(boss) {
+    const BADGE = this._BOSS_BADGE, GAP = 8;
+    const keys = boss ? activeStatuses(boss) : [];
+    while (this._bossStatusIcons.length > keys.length) {
+      const b = this._bossStatusIcons.pop();
+      b.img.destroy();
+      b.tier.destroy();
+    }
+    while (this._bossStatusIcons.length < keys.length) {
+      this._bossStatusIcons.push({
+        img: this.add.image(0, 0, 'effect_icons', 0)
+          .setDisplaySize(BADGE, BADGE),
+        tier: this.add.text(0, 0, '', {
+          fontSize: '20px', fontFamily: '"Arial Black", Arial, sans-serif',
+          color: '#ffffff', stroke: '#000000', strokeThickness: 5,
+        }).setOrigin(1, 1),
+      });
+    }
+    if (!keys.length) return;
+    const W = this.scale.width;
+    const rowW = keys.length * BADGE + (keys.length - 1) * GAP;
+    const y = this._BOSS_BADGE_Y;
+    keys.forEach((k, i) => {
+      const b  = this._bossStatusIcons[i];
+      const cx = W / 2 - rowW / 2 + BADGE / 2 + i * (BADGE + GAP);
+      b.img.setFrame(EFFECT_ICON_FRAME[k]).setPosition(cx, y);
+      const st = boss[STATUS_FIELD[k]];
+      b.tier.setText(ROMAN[st && st.tier] || '')
+            .setPosition(cx + BADGE / 2 + 3, y + BADGE / 2 + 3);
+    });
   }
 }
 
