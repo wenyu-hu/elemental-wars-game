@@ -5505,11 +5505,14 @@ class HUDScene extends Phaser.Scene {
     const panelY = H - 80;
 
     // ── Bar geometry ──────────────────────────────
-    // Bars are horizontally centred on the screen.
-    const BAR_W = 260, BAR_H = 14;
-    const BAR_X = Math.round((W - BAR_W) / 2);  // 270 for W=800
-    const xpY   = panelY + 18;                  // 418
-    const hpY   = panelY + 40;                  // 440
+    // Bars are horizontally centred on the screen.  Widened from 260x14
+    // so they don't look undersized beside the enlarged element row.
+    const BAR_W = 340, BAR_H = 16;
+    const BAR_X = Math.round((W - BAR_W) / 2);  // 230 for W=800
+    // Stack measured up from the bottom edge: slots sit lowest (they're
+    // the tallest now), then HP, then XP.
+    const xpY   = 402;
+    const hpY   = 422;
     this._BAR_W = BAR_W;
     this._BAR_X = BAR_X;
     this._HP_Y  = hpY;
@@ -5580,11 +5583,18 @@ class HUDScene extends Phaser.Scene {
     this._bossStatusIcons = [];
 
     // ── Pause button (yellow) — raised so there's air below it ──
-    const btnY = panelY + 50;   // was 65; 15px higher for bottom padding
-    const pb = this.add.rectangle(28, btnY, 36, 36, 0xffd54f)
+    // Buttons are pushed out to three corners so the middle of the bottom
+    // edge is free for the wider element row.  Pause goes top-right,
+    // clear of the boss bar (which spans x 90-710) and its badges.
+    const BTN = 36;
+    const btnY  = 454;                 // bottom row, aligned with the slots
+    const pauseX = W - 28, pauseY = 28;
+    const invX   = 28;
+    const abX    = W - 28, abY = btnY;
+    const pb = this.add.rectangle(pauseX, pauseY, BTN, BTN, 0xffd54f)
       .setStrokeStyle(3, 0xc99a1a)
       .setInteractive({ useHandCursor: true });
-    this.pauseIcon = this.add.text(28, btnY, '⏸', {
+    this.pauseIcon = this.add.text(pauseX, pauseY, '⏸', {
       fontSize: '22px', fontFamily: 'Arial, sans-serif',
       color: '#000000',
     }).setOrigin(0.5);
@@ -5593,10 +5603,10 @@ class HUDScene extends Phaser.Scene {
     pb.on('pointerup',   () => this._togglePause());
 
     // ── Inventory button (chest) ──────────────────
-    const ib = this.add.rectangle(72, btnY, 36, 36, 0xb98b5a)
+    const ib = this.add.rectangle(invX, btnY, BTN, BTN, 0xb98b5a)
       .setStrokeStyle(3, 0x6b4a25)
       .setInteractive({ useHandCursor: true });
-    this.add.image(72, btnY + 1, 'chest', 0).setScale(1.6);
+    this.add.image(invX, btnY + 1, 'chest', 0).setScale(1.6);
     ib.on('pointerover', () => ib.setFillStyle(0xd4a46c));
     ib.on('pointerout',  () => ib.setFillStyle(0xb98b5a));
     ib.on('pointerup',   () => this._openStatusSheet());
@@ -5608,7 +5618,7 @@ class HUDScene extends Phaser.Scene {
     });
 
     // ── Arrows button (3 drawn arrows + quantity badge) ──
-    const ab = this.add.rectangle(116, btnY, 36, 36, 0xa5adb8)
+    const ab = this.add.rectangle(abX, abY, BTN, BTN, 0xa5adb8)
       .setStrokeStyle(3, 0x4a4f5a)
       .setInteractive({ useHandCursor: true });
     // Draw 3 diagonal arrows with Graphics (quiver look)
@@ -5617,23 +5627,23 @@ class HUDScene extends Phaser.Scene {
     for (let i = 0; i < 3; i++) {
       const dy = (i - 1) * 5;
       ag.beginPath();
-      ag.moveTo(116 - 11, btnY - 4 + dy + 7);
-      ag.lineTo(116 + 9,  btnY - 4 + dy - 7);
+      ag.moveTo(abX - 11, abY - 4 + dy + 7);
+      ag.lineTo(abX + 9,  abY - 4 + dy - 7);
       ag.strokePath();
     }
     ag.fillStyle(0x1e2a38, 1);
     for (let i = 0; i < 3; i++) {
       const dy = (i - 1) * 5;
       ag.fillTriangle(
-        116 + 9,  btnY - 4 + dy - 7,
-        116 + 3,  btnY - 4 + dy - 4,
-        116 + 6,  btnY - 4 + dy,
+        abX + 9,  abY - 4 + dy - 7,
+        abX + 3,  abY - 4 + dy - 4,
+        abX + 6,  abY - 4 + dy,
       );
       // Fletching squares at tail
-      ag.fillRect(116 - 13, btnY - 4 + dy + 6, 3, 3);
+      ag.fillRect(abX - 13, abY - 4 + dy + 6, 3, 3);
     }
     // Quantity badge (bottom-right)
-    this.arrowCount = this.add.text(116 + 14, btnY + 14, '0', {
+    this.arrowCount = this.add.text(abX + 14, abY + 14, '0', {
       fontSize: '12px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff', stroke: '#000000', strokeThickness: 3,
     }).setOrigin(1, 1);
@@ -5644,11 +5654,14 @@ class HUDScene extends Phaser.Scene {
     // ── 10 Element slots (aligned with bar edges) ──
     // setOrigin(0, 0.5) → sx is the LEFT edge of each slot (not centre).
     // Without this, default origin 0.5 makes the row sit ~11px too far left.
-    const slotSize  = 22;
-    const slotGap   = 4;
-    const slotRowW  = 10 * slotSize + 9 * slotGap;                 // 256
-    const slotStart = BAR_X + Math.round((BAR_W - slotRowW) / 2);  // 272 (2px in from bar edge)
-    const slotY     = panelY + 65;
+    // Slots match the corner buttons at 36px so they're the same touch
+    // target, which makes the row wider than the bars — so it centres on
+    // the screen rather than on the bars.
+    const slotSize  = BTN;
+    const slotGap   = 5;
+    const slotRowW  = 10 * slotSize + 9 * slotGap;         // 405
+    const slotStart = Math.round((W - slotRowW) / 2);      // 198
+    const slotY     = btnY;
     this.hotbarSlots = [];
     for (let i = 0; i < 10; i++) {
       const sx = slotStart + i * (slotSize + slotGap);
@@ -5658,7 +5671,7 @@ class HUDScene extends Phaser.Scene {
         .setInteractive({ useHandCursor: true })
         .on('pointerup', () => this._gs && this._gs._fireElementInSlot(i));
       const icon = this.add.sprite(sx + slotSize / 2, slotY, 'icon_fire', 0)
-        .setScale(0.55).setVisible(false);
+        .setScale(0.9).setVisible(false);   // scaled with the bigger slot
       const darken = this.add.rectangle(sx, slotY, slotSize, slotSize, 0x000000, 0.55)
         .setOrigin(0, 0.5).setVisible(false);
       const reloadBar = this.add.rectangle(sx, slotY + slotSize / 2, slotSize, 0, 0x33aaff)
