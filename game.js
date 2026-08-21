@@ -273,7 +273,26 @@ const DOOR = {
 };
 // The boss room is exactly one screenful — at 0.65 zoom the camera sees
 // 800/0.65 x 480/0.65 world units, so a room that size never scrolls.
-const GAME_ZOOM     = 0.65;
+// A phone is far wider than 800x480, so the canvas pillarboxes and wastes
+// the sides.  On touch we widen the canvas to the device's own aspect and
+// raise the camera zoom by the same factor, which keeps the *world* view
+// identical — no secret becomes visible that wasn't before — while handing
+// the extra pixels to the HUD, pushing both thumbs away from the action.
+// Measured off the long/short side rather than innerWidth/innerHeight so a
+// page that loads in portrait still sizes for the landscape it'll be played in.
+const BASE_W        = 800;
+const GAME_H        = 480;
+const WORLD_VIEW_W  = BASE_W / 0.65;    // 1230.8 world px — held constant
+const IS_TOUCH_DEVICE = typeof window !== 'undefined'
+  && window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+const GAME_W = (() => {
+  if (!IS_TOUCH_DEVICE) return BASE_W;
+  const long  = Math.max(window.innerWidth, window.innerHeight);
+  const short = Math.min(window.innerWidth, window.innerHeight);
+  if (!short) return BASE_W;
+  return Math.round(Math.min(1200, Math.max(BASE_W, GAME_H * (long / short))));
+})();
+const GAME_ZOOM     = GAME_W / WORLD_VIEW_W;   // 0.65 at 800, 0.845 at 1040
 // Vertical window chosen so the carpet sits ~85% down the view, leaving
 // headroom above for the Emperor.
 const BOSS_ROOM_TOP = 141;
@@ -1405,6 +1424,12 @@ class GameScene extends Phaser.Scene {
 
     this._jumpHeld = false;
     this._spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    // Touch has no SPACE, so a tap anywhere advances dialogue and skips
+    // the chest cinematic.  Without this a phone player is stuck in the
+    // first message box forever.  Set unconditionally and cleared each
+    // frame by whoever consumes it, so a stray tap can't bank up.
+    this._advanceTapped = false;
+    this.input.on('pointerdown', () => { this._advanceTapped = true; });
     this._dummyDialogTriggered       = false;
     this._patrolDummyDialogTriggered = false;
 
@@ -1446,6 +1471,7 @@ class GameScene extends Phaser.Scene {
       this.time.delayedCall(600, () => {
         if (this._chestSequenceActive) return;   // don't clash with an active cinematic
         this._chestSequenceActive = true;
+        this._advanceTapped = false;
         this._playElementChoiceScreen(() => { this._chestSequenceActive = false; });
       });
     }
@@ -2344,6 +2370,7 @@ class GameScene extends Phaser.Scene {
     const cleanup = () => layer.forEach(o => o.destroy());
 
     this._chestSequenceActive = true;               // freezes player input
+    this._advanceTapped = false;                    // ignore the tap that led here
     const puzzle = generateDoorPuzzle();
 
     const dim = add(this.add.rectangle(CX, CY, W * U, H * U, 0x000000, 0));
@@ -3602,7 +3629,9 @@ class GameScene extends Phaser.Scene {
     }).setScrollFactor(0).setDepth(22).setVisible(false);
 
     // "Press SPACE" hint — bottom-right corner of the box
-    const hint = this.add.text(BX + BW - 8, BY + BH - 6, '[SPACE]', {
+    // Prompt matches whichever input the player actually has.
+    const hint = this.add.text(BX + BW - 8, BY + BH - 6,
+      touchControlsOn() ? '[TAP]' : '[SPACE]', {
       fontSize: '11px', fontFamily: 'monospace', color: '#aaaaaa',
     }).setScrollFactor(0).setDepth(22).setOrigin(1, 1).setVisible(false);
 
@@ -3625,8 +3654,16 @@ class GameScene extends Phaser.Scene {
 
     this._dialog.queue = entries.slice();
     this._dialog.active = true;
+    this._advanceTapped = false;   // ignore the tap that led here
     this._dialog.prompt.setVisible(false);
     this._advanceDialog();
+  }
+
+  // True once per tap, then cleared — the touch equivalent of JustDown.
+  _tappedToAdvance() {
+    if (!this._advanceTapped) return false;
+    this._advanceTapped = false;
+    return true;
   }
 
   _advanceDialog() {
@@ -3904,7 +3941,7 @@ class GameScene extends Phaser.Scene {
 
     // Space advances or closes the dialog box
     if (this._dialog.active) {
-      if (Phaser.Input.Keyboard.JustDown(this._spaceKey)) {
+      if (Phaser.Input.Keyboard.JustDown(this._spaceKey) || this._tappedToAdvance()) {
         this._advanceDialog();
       }
       this.updateDummyBar();
@@ -3915,7 +3952,8 @@ class GameScene extends Phaser.Scene {
     if (this._chestSequenceActive) {
       const bod = this.player && this.player.sprite && this.player.sprite.body;
       if (bod) bod.setVelocity(0, bod.velocity.y);    // arrest horizontal drift
-      if (Phaser.Input.Keyboard.JustDown(this._spaceKey) && this._chestSkipHandler) {
+      if ((Phaser.Input.Keyboard.JustDown(this._spaceKey) || this._tappedToAdvance())
+          && this._chestSkipHandler) {
         this._chestSkipHandler();
       }
       this.updateDummyBar();
@@ -4839,6 +4877,7 @@ class GameScene extends Phaser.Scene {
   _playChestSequence(opts) {
     if (this._chestSequenceActive) return;
     this._chestSequenceActive = true;
+    this._advanceTapped = false;       // ignore the tap that led here
     this._pendingElementChoices = 0;   // incremented once per level-up below
 
     const W = this.scale.width, H = this.scale.height;
@@ -5600,7 +5639,7 @@ class HUDScene extends Phaser.Scene {
     this.add.rectangle(BAR_X, xpY, BAR_W, BAR_H)
       .setOrigin(0, 0.5).setStrokeStyle(2, 0x000000).setFillStyle();
     this.xpText = this.add.text(BAR_X + BAR_W / 2, xpY, '0/15', {
-      fontSize: '11px', fontFamily: '"Arial Black", Arial, sans-serif',
+      fontSize: TOUCH_HUD ? '13px' : '11px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff', stroke: '#000000', strokeThickness: 2,
     }).setOrigin(0.5);
 
@@ -5622,7 +5661,7 @@ class HUDScene extends Phaser.Scene {
     this.hpGhost = this.add.rectangle(BAR_X, hpY, BAR_W, BAR_H, 0x9b4dff)
       .setOrigin(0, 0.5).setVisible(false);
     this.hpText = this.add.text(BAR_X + BAR_W / 2, hpY, '100/100', {
-      fontSize: '11px', fontFamily: '"Arial Black", Arial, sans-serif',
+      fontSize: TOUCH_HUD ? '13px' : '11px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff', stroke: '#000000', strokeThickness: 2,
     }).setOrigin(0.5);
 
@@ -5664,6 +5703,9 @@ class HUDScene extends Phaser.Scene {
     // edge is free for the wider element row.  Pause goes top-right,
     // clear of the boss bar (which spans x 90-710) and its badges.
     const BTN = TOUCH_HUD ? 56 : 36;    // 56 * 0.78 = 43.7 real px
+    // Everything drawn inside a button scales with it, so the glyphs keep
+    // the same proportion instead of rattling around in a bigger circle.
+    const GLYPH = BTN / 36;
     const btnY  = TOUCH_HUD ? 444 : 454;   // bottom row, aligned with slots
     const pauseX = W - 28, pauseY = 28;
     const invX   = 28;
@@ -5672,7 +5714,7 @@ class HUDScene extends Phaser.Scene {
       .setStrokeStyle(3, 0xc99a1a)
       .setInteractive({ useHandCursor: true });
     this.pauseIcon = this.add.text(pauseX, pauseY, '⏸', {
-      fontSize: '22px', fontFamily: 'Arial, sans-serif',
+      fontSize: `${Math.round(22 * GLYPH)}px`, fontFamily: 'Arial, sans-serif',
       color: '#000000',
     }).setOrigin(0.5);
     pb.on('pointerover', () => pb.setFillStyle(0xffe47a));
@@ -5683,7 +5725,7 @@ class HUDScene extends Phaser.Scene {
     const ib = this.add.rectangle(invX, btnY, BTN, BTN, 0xb98b5a)
       .setStrokeStyle(3, 0x6b4a25)
       .setInteractive({ useHandCursor: true });
-    this.add.image(invX, btnY + 1, 'chest', 0).setScale(1.6);
+    this.add.image(invX, btnY + 1, 'chest', 0).setScale(1.6 * GLYPH);
     ib.on('pointerover', () => ib.setFillStyle(0xd4a46c));
     ib.on('pointerout',  () => ib.setFillStyle(0xb98b5a));
     ib.on('pointerup',   () => this._openStatusSheet());
@@ -5704,24 +5746,25 @@ class HUDScene extends Phaser.Scene {
     for (let i = 0; i < 3; i++) {
       const dy = (i - 1) * 5;
       ag.beginPath();
-      ag.moveTo(abX - 11, abY - 4 + dy + 7);
-      ag.lineTo(abX + 9,  abY - 4 + dy - 7);
+      ag.moveTo(-11, -4 + dy + 7);
+      ag.lineTo(  9, -4 + dy - 7);
       ag.strokePath();
     }
     ag.fillStyle(0x1e2a38, 1);
     for (let i = 0; i < 3; i++) {
       const dy = (i - 1) * 5;
       ag.fillTriangle(
-        abX + 9,  abY - 4 + dy - 7,
-        abX + 3,  abY - 4 + dy - 4,
-        abX + 6,  abY - 4 + dy,
+         9, -4 + dy - 7,
+         3, -4 + dy - 4,
+         6, -4 + dy,
       );
       // Fletching squares at tail
-      ag.fillRect(abX - 13, abY - 4 + dy + 6, 3, 3);
+      ag.fillRect(-13, -4 + dy + 6, 3, 3);
     }
+    ag.setPosition(abX, abY).setScale(GLYPH);
     // Quantity badge (bottom-right)
-    this.arrowCount = this.add.text(abX + 14, abY + 14, '0', {
-      fontSize: '12px', fontFamily: '"Arial Black", Arial, sans-serif',
+    this.arrowCount = this.add.text(abX + 14 * GLYPH, abY + 14 * GLYPH, '0', {
+      fontSize: `${Math.round(12 * GLYPH)}px`, fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff', stroke: '#000000', strokeThickness: 3,
     }).setOrigin(1, 1);
     ab.on('pointerover', () => ab.setFillStyle(0xb8bfcb));
@@ -6005,15 +6048,19 @@ class HUDScene extends Phaser.Scene {
   _buildActionCluster(makeBtn) {
     // x, y, r, virtual key, and which equipment slot supplies the icon.
     const SPEC = [
-      { id: 'jump',     x: 651, y: 305, r: 42, vk: 'up', label: '\u25B2', fs: 32 },
-      { id: 'artifact', x: 626, y: 212, r: 33, slot: 'artifact'     },
-      { id: 'ranged',   x: 710, y: 229, r: 33, slot: 'rangedWeapon' },
-      { id: 'defence',  x: 747, y: 297, r: 33, slot: 'defence', vk: 't' },
+      // dx is measured from the right edge, so a wider canvas carries the
+      // whole cluster outward with it rather than stranding it mid-screen.
+      { id: 'jump',     dx: 149, y: 305, r: 42, vk: 'up', label: '\u25B2', fs: 32 },
+      { id: 'artifact', dx: 174, y: 212, r: 33, slot: 'artifact'     },
+      { id: 'ranged',   dx:  90, y: 229, r: 33, slot: 'rangedWeapon' },
+      { id: 'defence',  dx:  53, y: 297, r: 33, slot: 'defence', vk: 't' },
       // Melee always shows: bare fists are still an attack.
-      { id: 'melee',    x: 722, y: 369, r: 33, slot: 'meleeWeapon', vk: 'e', always: true },
+      { id: 'melee',    dx:  78, y: 369, r: 33, slot: 'meleeWeapon', vk: 'e', always: true },
     ];
 
-    this._actionBtns = SPEC.map(def => {
+    const W = this.scale.width;
+    this._actionBtns = SPEC.map(raw => {
+      const def = { ...raw, x: W - raw.dx };
       const circle = makeBtn(def.x, def.y, def.label || '', def.vk || null,
                              def.fs || 22, def.r);
       // Icon sits above the circle; swapped out when gear changes.
@@ -6215,8 +6262,8 @@ window._ewGame = new Phaser.Game({
   scale: {
     mode:       Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
-    width:  800,
-    height: 480,
+    width:  GAME_W,
+    height: GAME_H,
   },
   physics: { default:'arcade', arcade:{ gravity:{ y:600 }, debug:false } },
   scene:  [PreloadScene, MenuScene, MapScene, GameScene, HUDScene]
