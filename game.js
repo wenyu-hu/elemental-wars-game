@@ -1143,7 +1143,8 @@ class GameScene extends Phaser.Scene {
     this._guardTimer = 0;
     this._surgeAcc = 0;
     this.door = null;              // EX-level Golden Door
-    this._doorLockout = false;     // frozen while the door's bolt is in flight
+    this._doorLockout = false;     // pinned at the door: solving the puzzle,
+                                   // or watching its bolt come at you
     this._doorBolt = null;
     this._bossOver = false;        // true once the Emperor falls
     this._checkpoint = null;       // last world snapshot (hard-checkpoint levels)
@@ -2401,7 +2402,11 @@ class GameScene extends Phaser.Scene {
     const add = o => { o.setScrollFactor(0).setDepth(D); layer.push(o); return o; };
     const cleanup = () => layer.forEach(o => o.destroy());
 
-    this._chestSequenceActive = true;               // freezes player input
+    // Pins the player without freezing the world.  _chestSequenceActive
+    // would early-return before the zombie/guard updates, which let you
+    // sprint past a whole wave, crack the door open and solve it in total
+    // safety.  The gauntlet has to still be happening around you.
+    this._doorLockout = true;
     this._advanceTapped = false;                    // ignore the tap that led here
     const puzzle = generateDoorPuzzle();
 
@@ -2514,7 +2519,12 @@ class GameScene extends Phaser.Scene {
   _updateDoor() {
     const d = this.door;
     if (!d || !d.opened || d.passed || !this.player) return;
-    if (this.player.sprite.x > d.sprite.x + 20) {
+    // Contact takes you through, the way the portal does.  A geometric
+    // test rather than a physics overlap because an open door has its
+    // body disabled so the player can walk into it at all.
+    const touching = Phaser.Geom.Intersects.RectangleToRectangle(
+      this.player.sprite.getBounds(), d.sprite.getBounds());
+    if (touching) {
       d.passed = true;
       // Through the door is the boss room.  It starts its own checkpoint
       // on entry, so dying to the Emperor replays the fight rather than
@@ -2540,7 +2550,7 @@ class GameScene extends Phaser.Scene {
     this._flashDoorMessage('Correct!', '#7CFC64');
     this.time.delayedCall(900, () => {
       cleanup();
-      this._chestSequenceActive = false;
+      this._doorLockout = false;
       this.door.opened = true;
       this.door.solving = false;
       this.door.sprite.setFrame(1);          // swing it ajar
@@ -2558,8 +2568,7 @@ class GameScene extends Phaser.Scene {
     this.time.delayedCall(700, () => {
       cleanup();
       this.door.solving = false;
-      this._doorLockout = true;              // player frozen, input ignored
-      this._chestSequenceActive = false;
+      this._doorLockout = true;              // stays pinned for the bolt
       this._fireDoorBolt();
     });
   }
@@ -4419,8 +4428,9 @@ class GameScene extends Phaser.Scene {
 
   updatePlayer(delta) {
     const p = this.player, s = p.sprite, bod = s.body, k = this.keys;
-    // Pinned in place while the door's bolt is in flight — the player
-    // watches it land rather than dodging it.
+    // Pinned at the door — solving the puzzle, or watching its bolt land
+    // rather than dodging it.  Only the controls are locked: the rest of
+    // update() still runs, so enemies keep coming and damage still lands.
     if (this._doorLockout) {
       bod.setVelocityX(0);
       s.anims.play(this._animKey('idle'), true);
