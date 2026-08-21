@@ -280,6 +280,10 @@ const DOOR = {
 // the extra pixels to the HUD, pushing both thumbs away from the action.
 // Measured off the long/short side rather than innerWidth/innerHeight so a
 // page that loads in portrait still sizes for the landscape it'll be played in.
+// Touch equivalent of the X-key shortcut into the EX level.
+const EX_SPAM_TAPS  = 12;
+const EX_SPAM_MS    = 5000;
+
 const BASE_W        = 800;
 const GAME_H        = 480;
 const WORLD_VIEW_W  = BASE_W / 0.65;    // 1230.8 world px — held constant
@@ -5526,6 +5530,33 @@ class MapScene extends Phaser.Scene {
       gfx.fillStyle(0xffffff, 0.75).fillRoundedRect(-9, 6, 18, 14, 3);
       gfx.lineStyle(4, 0xffffff, 0.75);
       gfx.beginPath(); gfx.arc(0, 6, 8, Math.PI, 0, false); gfx.strokePath();
+
+      // Touch has no X key, so spam-tapping the locked node opens it
+      // early — same escape hatch, same always-available behaviour.
+      // Deliberately steep: a puzzled player tapping a locked node gives
+      // up after three or four, well short of twelve inside five seconds.
+      lbl.setInteractive(new Phaser.Geom.Rectangle(-R, -R, R * 2, R * 2),
+                         Phaser.Geom.Rectangle.Contains);
+      const taps = [];
+      lbl.on('pointerdown', () => {
+        const now = this.time.now;
+        taps.push(now);
+        while (taps.length && now - taps[0] > EX_SPAM_MS) taps.shift();
+        if (taps.length >= EX_SPAM_TAPS) {
+          this.scene.start('GameScene', { level: 'ex' });
+          return;
+        }
+        // Past halfway the node starts to rattle — enough to tell you
+        // something is happening without advertising it to anyone who
+        // isn't already trying.
+        if (taps.length > EX_SPAM_TAPS / 2) {
+          const k = (taps.length - EX_SPAM_TAPS / 2) / (EX_SPAM_TAPS / 2);
+          this.tweens.add({
+            targets: [gfx, lbl], duration: 60, yoyo: true,
+            x: '+=' + (2 + 4 * k) * (taps.length % 2 ? 1 : -1),
+          });
+        }
+      });
     }
 
     this.add.text(x, y + R + 16, open ? 'Anniversary' : exOpensLabel(), {
