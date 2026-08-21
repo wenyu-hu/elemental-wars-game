@@ -1,3 +1,14 @@
+/* env() can't be read from JS directly, so mirror the insets onto custom
+   properties the sizing code can measure.  Without this the canvas gets
+   sized for the full viewport while the body padding shrinks the space it
+   actually has — worst on an iPhone Pro Max, which has the largest insets. */
+:root {
+  --sai-top:    env(safe-area-inset-top,    0px);
+  --sai-right:  env(safe-area-inset-right,  0px);
+  --sai-bottom: env(safe-area-inset-bottom, 0px);
+  --sai-left:   env(safe-area-inset-left,   0px);
+}
+
 * {
   margin: 0;
   padding: 0;

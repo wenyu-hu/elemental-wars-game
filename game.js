@@ -289,14 +289,38 @@ const GAME_H        = 480;
 const WORLD_VIEW_W  = BASE_W / 0.65;    // 1230.8 world px — held constant
 const IS_TOUCH_DEVICE = typeof window !== 'undefined'
   && window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-const GAME_W = (() => {
+
+// The body is padded by the safe-area insets so the HUD clears a notch,
+// which means the space the canvas really has is smaller than the raw
+// viewport.  Measuring the viewport instead sizes the canvas too wide and
+// FIT letterboxes the difference — worst on an iPhone Pro Max, which has
+// the deepest insets of any phone.
+function safeAreaInsets() {
+  if (typeof getComputedStyle !== 'function') return { x: 0, y: 0 };
+  const cs = getComputedStyle(document.documentElement);
+  const px = n => parseFloat(cs.getPropertyValue(n)) || 0;
+  return {
+    x: px('--sai-left') + px('--sai-right'),
+    y: px('--sai-top')  + px('--sai-bottom'),
+  };
+}
+
+// Width that makes the canvas exactly fill the space available, at the
+// aspect the device will be played at.  Uses long/short rather than
+// width/height so a page loaded in portrait still sizes for landscape.
+function computeGameW() {
   if (!IS_TOUCH_DEVICE) return BASE_W;
-  const long  = Math.max(window.innerWidth, window.innerHeight);
-  const short = Math.min(window.innerWidth, window.innerHeight);
+  const sa = safeAreaInsets();
+  const availW = window.innerWidth  - sa.x;
+  const availH = window.innerHeight - sa.y;
+  const long  = Math.max(availW, availH);
+  const short = Math.min(availW, availH);
   if (!short) return BASE_W;
   return Math.round(Math.min(1200, Math.max(BASE_W, GAME_H * (long / short))));
-})();
-const GAME_ZOOM     = GAME_W / WORLD_VIEW_W;   // 0.65 at 800, 0.845 at 1040
+}
+
+let GAME_W = computeGameW();
+function gameZoom() { return GAME_W / WORLD_VIEW_W; }   // 0.65 at 800
 // Vertical window chosen so the carpet sits ~85% down the view, leaving
 // headroom above for the Emperor.
 const BOSS_ROOM_TOP = 141;
@@ -1131,7 +1155,7 @@ class GameScene extends Phaser.Scene {
     // floor math stays consistent across tutorials.
     const WORLD_W   = (this._levelNum === 2)      ? 6336
                     : (this._levelNum === 'ex')   ? 4800
-                    : (this._levelNum === 'exboss') ? Math.round(this.scale.width / GAME_ZOOM)
+                    : (this._levelNum === 'exboss') ? Math.round(this.scale.width / gameZoom())
                     : 5800;
     const WORLD_H   = 1200;
     const floorY    = WORLD_H - 4 * TS;       // grass tile centre  y = 816
@@ -1368,12 +1392,12 @@ class GameScene extends Phaser.Scene {
     // followOffset(0, +181): Phaser subtracts the offset from the target,
     // so +181 lifts the camera focus 181 world-units ABOVE the player,
     // giving ~75% sky / 20% ground on screen (Dadish look).
-    this.cameras.main.setZoom(GAME_ZOOM);
+    this.cameras.main.setZoom(gameZoom());
     if (this._levelNum === 'exboss') {
       // Bounds exactly one viewport, so the camera cannot scroll and the
       // whole arena is on screen at once — no following the player.
-      const viewW = this.scale.width  / GAME_ZOOM;
-      const viewH = this.scale.height / GAME_ZOOM;
+      const viewW = this.scale.width  / gameZoom();
+      const viewH = this.scale.height / gameZoom();
       this.cameras.main.setBounds(0, BOSS_ROOM_TOP, viewW, viewH);
       this.cameras.main.stopFollow();
       this.cameras.main.centerOn(viewW / 2, BOSS_ROOM_TOP + viewH / 2);
@@ -5864,6 +5888,15 @@ class HUDScene extends Phaser.Scene {
       fontSize: '15px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff', backgroundColor: '#3f4a63', padding: { x: 14, y: 7 },
     }).setOrigin(0.5).setVisible(false).setInteractive({ useHandCursor: true });
+    // Viewport readout — only on touch, and only while paused.  Exists so
+    // a fit problem on a device that can't be tested here (an iPhone Pro
+    // Max, say) can be read straight off the screen.  "fills" is the one
+    // that matters: anything but yes means letterboxing.
+    this.fitReadout = this.add.text(W / 2, H / 2 + 116, '', {
+      fontSize: '10px', fontFamily: 'monospace',
+      color: '#c9d2e6', backgroundColor: '#00000066', padding: { x: 8, y: 5 },
+      align: 'center',
+    }).setOrigin(0.5).setVisible(false);
     this.touchToggle.on('pointerover', () => this.touchToggle.setStyle({ backgroundColor: '#55638a' }));
     this.touchToggle.on('pointerout',  () => this.touchToggle.setStyle({ backgroundColor: '#3f4a63' }));
     this.touchToggle.on('pointerup', () => {
@@ -5896,6 +5929,19 @@ class HUDScene extends Phaser.Scene {
     this.pauseIcon.setText(paused ? '▶' : '⏸');
     this.pausedText.setVisible(paused);
     this.exitBtn.setVisible(paused);
+    const showFit = paused && touchControlsOn();
+    this.fitReadout.setVisible(showFit);
+    if (showFit) {
+      const c  = this.game.canvas.getBoundingClientRect();
+      const sa = safeAreaInsets();
+      const availW = Math.round(window.innerWidth  - sa.x);
+      const availH = Math.round(window.innerHeight - sa.y);
+      const fills  = Math.abs(c.width - availW) <= 2 && Math.abs(c.height - availH) <= 2;
+      this.fitReadout.setText(
+        `viewport ${window.innerWidth}x${window.innerHeight}  insets ${Math.round(sa.x)}/${Math.round(sa.y)}\n` +
+        `usable ${availW}x${availH}   canvas ${Math.round(c.width)}x${Math.round(c.height)}\n` +
+        `game ${GAME_W}x${GAME_H}  zoom ${gameZoom().toFixed(3)}  fills: ${fills ? 'yes' : 'NO'}`);
+    }
     this.touchToggle.setVisible(paused);
   }
 
@@ -6299,3 +6345,29 @@ window._ewGame = new Phaser.Game({
   physics: { default:'arcade', arcade:{ gravity:{ y:600 }, debug:false } },
   scene:  [PreloadScene, MenuScene, MapScene, GameScene, HUDScene]
 });
+
+// Safe-area insets swap between orientations, so a page that loads in
+// portrait computes a different width than the landscape it'll be played
+// in.  Recompute when the viewport changes and resize in place; the HUD
+// lays out from scale.width so it needs rebuilding, and the camera zoom
+// has to track the new width or the world view would change with it.
+if (IS_TOUCH_DEVICE) {
+  let resizeTimer = null;
+  const applyViewport = () => {
+    const want = computeGameW();
+    if (Math.abs(want - GAME_W) < 8) return;    // ignore browser-chrome jitter
+    GAME_W = want;
+    window._ewGame.scale.resize(GAME_W, GAME_H);
+    const gs = window._ewGame.scene.getScene('GameScene');
+    if (gs && gs.cameras && gs.cameras.main) gs.cameras.main.setZoom(gameZoom());
+    const hud = window._ewGame.scene.getScene('HUDScene');
+    if (hud && hud.scene.isActive()) hud.scene.restart();
+  };
+  // Debounced: iOS fires a burst of these mid-rotation, and the insets
+  // aren't settled until it stops.
+  ['resize', 'orientationchange'].forEach(evt =>
+    window.addEventListener(evt, () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(applyViewport, 250);
+    }));
+}
