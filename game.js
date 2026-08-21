@@ -1404,8 +1404,12 @@ class GameScene extends Phaser.Scene {
     } else {
       this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
       this.cameras.main.startFollow(this.player.sprite, true, 0.12, 0.10);
-      // +107 lifts camera focus above player so ground occupies ~30% of screen height
-      this.cameras.main.setFollowOffset(0, 107);
+      // +107 lifts camera focus above player so ground occupies ~30% of
+      // screen height.  On touch the HUD eats the bottom of the screen, so
+      // drop the camera a full tile: that puts two rows of floor under the
+      // element bar instead of one, at the cost of a row of ceiling the
+      // player almost never needs.
+      this.cameras.main.setFollowOffset(0, touchControlsOn() ? 107 - TS : 107);
     }
 
     // Input
@@ -5676,14 +5680,14 @@ class HUDScene extends Phaser.Scene {
     // steps up so buttons land around 44.  Desktop keeps 36.
     const TOUCH_HUD = touchControlsOn();
     this._TOUCH_HUD = TOUCH_HUD;
-    const BAR_W = TOUCH_HUD ? 420 : 340, BAR_H = TOUCH_HUD ? 18 : 16;
+    const BAR_W = TOUCH_HUD ? 420 : 260, BAR_H = TOUCH_HUD ? 18 : 14;
     const BAR_X = Math.round((W - BAR_W) / 2);  // 230 for W=800
     // Stack measured up from the bottom edge: slots sit lowest (they're
     // the tallest now), then HP, then XP.
     // Stack sits higher when the buttons are bigger, so the taller slot
     // row still clears the bottom edge.
-    const xpY   = TOUCH_HUD ? 379 : 402;
-    const hpY   = TOUCH_HUD ? 401 : 422;
+    const xpY   = TOUCH_HUD ? 379 : 418;
+    const hpY   = TOUCH_HUD ? 401 : 440;
     this._BAR_W = BAR_W;
     this._BAR_X = BAR_X;
     this._HP_Y  = hpY;
@@ -5761,7 +5765,7 @@ class HUDScene extends Phaser.Scene {
     // Everything drawn inside a button scales with it, so the glyphs keep
     // the same proportion instead of rattling around in a bigger circle.
     const GLYPH = BTN / 36;
-    const btnY  = TOUCH_HUD ? 444 : 454;   // bottom row, aligned with slots
+    const btnY  = TOUCH_HUD ? 444 : 465;   // bottom row, aligned with slots
     const pauseX = W - 28, pauseY = 28;
     const invX   = 28;
     const abX    = W - 28, abY = btnY;
@@ -5832,8 +5836,8 @@ class HUDScene extends Phaser.Scene {
     // Slots match the corner buttons at 36px so they're the same touch
     // target, which makes the row wider than the bars — so it centres on
     // the screen rather than on the bars.
-    const slotSize  = BTN;
-    const slotGap   = 5;
+    const slotSize  = TOUCH_HUD ? BTN : 22;
+    const slotGap   = TOUCH_HUD ? 5 : 4;
     const slotRowW  = 10 * slotSize + 9 * slotGap;         // 405
     const slotStart = Math.round((W - slotRowW) / 2);      // 198
     const slotY     = btnY;
@@ -5846,7 +5850,7 @@ class HUDScene extends Phaser.Scene {
         .setInteractive({ useHandCursor: true })
         .on('pointerup', () => this._gs && this._gs._fireElementInSlot(i));
       const icon = this.add.sprite(sx + slotSize / 2, slotY, 'icon_fire', 0)
-        .setScale(TOUCH_HUD ? 1.4 : 0.9).setVisible(false);   // tracks slot size
+        .setScale(TOUCH_HUD ? 1.4 : 0.55).setVisible(false);  // tracks slot size
       const darken = this.add.rectangle(sx, slotY, slotSize, slotSize, 0x000000, 0.55)
         .setOrigin(0, 0.5).setVisible(false);
       const reloadBar = this.add.rectangle(sx, slotY + slotSize / 2, slotSize, 0, 0x33aaff)
