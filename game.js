@@ -2492,7 +2492,12 @@ class GameScene extends Phaser.Scene {
 
     // ── Very bottom: submit ──────────────────────────────────────
     // Kept above canvas y~400, where the HUD's XP/HP bars start.
-    const [bx, by] = at(0, 140);
+    // SUBMIT sits below the tray at canvas y380 — which is fine against
+    // the desktop HUD (bars start at y418) but lands right on the touch
+    // one (bars start at y370).  The touch canvas is much wider than the
+    // desktop's, though, so there's room to move it alongside the tray
+    // rather than shrink the whole puzzle to fit.
+    const [bx, by] = touchControlsOn() ? at(210, 92) : at(0, 140);
     const btn = add(this.add.text(bx, by, '  SUBMIT  ', {
       fontSize: fs(18), fontFamily: FONT,
       color: '#3a2a00', backgroundColor: '#ffd700',
