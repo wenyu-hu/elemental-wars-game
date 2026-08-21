@@ -5765,15 +5765,17 @@ class HUDScene extends Phaser.Scene {
     // Everything drawn inside a button scales with it, so the glyphs keep
     // the same proportion instead of rattling around in a bigger circle.
     const GLYPH = BTN / 36;
-    // Desktop: all three sit in a row along the bottom-left, 15px above
-    // the slot row, exactly as they did originally.  Touch spreads them to
-    // three corners instead, because the enlarged element row needs the
-    // whole middle of the bottom edge.
+    // Pause sits top-right on both layouts.  It's a meta control — about
+    // the session, not the character — so it reads better away from the
+    // two that are the character's own kit, and keeping it in the same
+    // corner everywhere means it never has to be relearned between
+    // desktop and phone.  Inventory and arrows keep the bottom-left.
     const btnY  = TOUCH_HUD ? 444 : 450;
-    const pauseX = TOUCH_HUD ? W - 28 : 28;
-    const pauseY = TOUCH_HUD ? 28      : btnY;
-    const invX   = TOUCH_HUD ? 28      : 72;
-    const abX    = TOUCH_HUD ? W - 28  : 116;
+    const pauseX = W - 28, pauseY = 28;
+    const invX   = 28;
+    // Touch pushes arrows to the far corner so the wide element row has
+    // the middle; desktop's row is narrow enough to sit them side by side.
+    const abX    = TOUCH_HUD ? W - 28 : 72;
     const abY    = btnY;
     const pb = this.add.rectangle(pauseX, pauseY, BTN, BTN, 0xffd54f)
       .setStrokeStyle(3, 0xc99a1a)
