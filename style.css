@@ -62,10 +62,15 @@ body {
 }
 
 /* Portrait phones letterbox the 800x480 game down to ~28% of the screen,
-   which isn't playable — ask for landscape instead.  Height cap keeps
-   this off desktop windows that merely happen to be tall. */
+   which isn't playable — ask for landscape instead.
+   Gated on WIDTH, not height: width is what actually limits the canvas
+   under Phaser's FIT, and it's what separates a phone from a tablet.
+   A portrait iPad is 768px+ wide and renders the game at ~96% scale, so
+   it's perfectly playable and must not be nagged.  Height would have
+   been wrong twice over — it misses the iPhone 15 Pro Max at 932px tall
+   while catching nothing a tablet does differently. */
 #rotate-prompt { display: none; }
-@media (orientation: portrait) and (max-height: 900px) and (pointer: coarse) {
+@media (orientation: portrait) and (max-width: 700px) and (pointer: coarse) {
   #game-container { display: none; }
   #rotate-prompt {
     display: flex;
