@@ -5765,10 +5765,16 @@ class HUDScene extends Phaser.Scene {
     // Everything drawn inside a button scales with it, so the glyphs keep
     // the same proportion instead of rattling around in a bigger circle.
     const GLYPH = BTN / 36;
-    const btnY  = TOUCH_HUD ? 444 : 465;   // bottom row, aligned with slots
-    const pauseX = W - 28, pauseY = 28;
-    const invX   = 28;
-    const abX    = W - 28, abY = btnY;
+    // Desktop: all three sit in a row along the bottom-left, 15px above
+    // the slot row, exactly as they did originally.  Touch spreads them to
+    // three corners instead, because the enlarged element row needs the
+    // whole middle of the bottom edge.
+    const btnY  = TOUCH_HUD ? 444 : 450;
+    const pauseX = TOUCH_HUD ? W - 28 : 28;
+    const pauseY = TOUCH_HUD ? 28      : btnY;
+    const invX   = TOUCH_HUD ? 28      : 72;
+    const abX    = TOUCH_HUD ? W - 28  : 116;
+    const abY    = btnY;
     const pb = this.add.rectangle(pauseX, pauseY, BTN, BTN, 0xffd54f)
       .setStrokeStyle(3, 0xc99a1a)
       .setInteractive({ useHandCursor: true });
@@ -5840,7 +5846,8 @@ class HUDScene extends Phaser.Scene {
     const slotGap   = TOUCH_HUD ? 5 : 4;
     const slotRowW  = 10 * slotSize + 9 * slotGap;         // 405
     const slotStart = Math.round((W - slotRowW) / 2);      // 198
-    const slotY     = btnY;
+    // Desktop slots sit 15px below the button row; on touch they share it.
+    const slotY     = TOUCH_HUD ? btnY : 465;
     this.hotbarSlots = [];
     for (let i = 0; i < 10; i++) {
       const sx = slotStart + i * (slotSize + slotGap);
