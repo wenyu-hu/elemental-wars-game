@@ -4938,7 +4938,11 @@ class GameScene extends Phaser.Scene {
     const add   = obj => { obj.setScrollFactor(0).setDepth(D); layer.push(obj); return obj; };
 
     // Phase 1 — dim screen
-    const dim = add(this.add.rectangle(0, 0, W, H, 0x000000, 0).setOrigin(0));
+    // Sized by 1/zoom: scrollFactor-0 objects are still scaled by the
+    // camera, so a W x H rectangle only covers zoom% of the screen and
+    // leaves the game visible around the edges.
+    const U = 1 / this.cameras.main.zoom;
+    const dim = add(this.add.rectangle(cx, cy, W * U, H * U, 0x000000, 0));
     this.tweens.add({ targets: dim, fillAlpha: 0.66, duration: 280, ease: 'Sine.easeOut' });
 
     // Phase 2 — enlarged XP bar
@@ -5209,7 +5213,11 @@ class GameScene extends Phaser.Scene {
     const layer = [];
     const add = obj => { obj.setScrollFactor(0).setDepth(D); layer.push(obj); return obj; };
 
-    const dim = add(this.add.rectangle(0, 0, W, H, 0x000000, 0).setOrigin(0));
+    // Sized by 1/zoom: scrollFactor-0 objects are still scaled by the
+    // camera, so a W x H rectangle only covers zoom% of the screen and
+    // leaves the game visible around the edges.
+    const U = 1 / this.cameras.main.zoom;
+    const dim = add(this.add.rectangle(cx, cy, W * U, H * U, 0x000000, 0));
     this.tweens.add({ targets: dim, fillAlpha: 0.66, duration: 280, ease: 'Sine.easeOut' });
 
     const msg = add(this.add.text(cx, cy - 90, 'You leveled up!\nChoose a basic element.', {
