@@ -2933,9 +2933,8 @@ class GameScene extends Phaser.Scene {
     const barLb = this.add.text(0, 0, '', { fontSize: '9px', fontFamily: 'monospace', color: '#ffbbbb' })
       .setOrigin(0.5, 1).setDepth(15).setVisible(false);
     // Small flame icon shown beside the healthbar while burning.
-    const fireIcon = this.add.image(0, 0, 'icon_fire', 0).setScale(1.4).setDepth(15).setVisible(false);
     const rd = { sprite, hp: maxHp, maxHp, dead: false, fireTimer: 0,
-                 bar: { bg: barBg, fg: barFg, label: barLb, fireIcon }, burn: null };
+                 bar: { bg: barBg, fg: barFg, label: barLb }, burn: null };
     // Stagger the two dummies so they don't fire in unison.
     rd.fireTimer = 1500 + Math.random() * 1500;
     return rd;
@@ -2947,7 +2946,6 @@ class GameScene extends Phaser.Scene {
       const b = rd.bar;
       if (rd.dead || !rd.sprite.active) {
         b.bg.setVisible(false); b.fg.setVisible(false); b.label.setVisible(false);
-        b.fireIcon.setVisible(false);
         continue;
       }
       const ds = rd.sprite, barW = 70;
@@ -2955,7 +2953,6 @@ class GameScene extends Phaser.Scene {
       b.bg.setPosition(bx, by).setSize(barW, 9).setVisible(true);
       b.fg.setPosition(bx - barW / 2, by).setSize(barW * rd.hp / rd.maxHp, 9).setVisible(true);
       b.label.setPosition(bx, by - 9).setText(`HP: ${rd.hp} / ${rd.maxHp}`).setVisible(true);
-      b.fireIcon.setPosition(bx + barW / 2 + 12, by).setVisible(!!rd.burn);
     }
   }
 
@@ -3049,6 +3046,10 @@ class GameScene extends Phaser.Scene {
       e.burn.msLeft -= delta;
       if (e.burn.msLeft > 0) return;
       hit(e.burn.dmgPerTick);
+      // The hit may have killed the target, and a death handler is free to
+      // clear its statuses — _damageRangedDummy does exactly that — so
+      // nothing below may assume the burn is still there.
+      if (!e.burn) return;
       e.burn.ticksLeft -= 1;
       if (e.burn.ticksLeft > 0 && !e.dead) e.burn.msLeft += BURN_TICK_MS;
       else e.burn = null;
@@ -3060,6 +3061,7 @@ class GameScene extends Phaser.Scene {
       e.poison.msLeft  -= delta;
       if (e.poison.msLeft <= 0) {
         hit(e.poison.stacks);
+        if (!e.poison) return;          // same as burn: the hit may have killed it
         e.poison.msLeft += e.poison.tickMs;
       }
       if (e.poison.msTotal <= 0) e.poison = null;
@@ -3078,9 +3080,9 @@ class GameScene extends Phaser.Scene {
     this._updateStatusIcons();
   }
 
-  // Ranged dummies show their flame beside a healthbar; everything else
-  // has no bar, so badges sit in a row above the sprite.  Several can be
-  // active at once, so they lay out side by side rather than stacking.
+  // Badges sit in a row above the sprite; several can be active at once,
+  // so they lay out side by side rather than stacking.  Ranged dummies
+  // need extra lift to clear the healthbar and its label.
   _updateStatusIcons() {
     const BADGE = 32, GAP = 4;
     const mark = (e) => {
@@ -3107,7 +3109,7 @@ class GameScene extends Phaser.Scene {
         });
       }
       const rowW = keys.length * BADGE + (keys.length - 1) * GAP;
-      const top  = e.sprite.y - e.sprite.displayHeight / 2 - 18;
+      const top  = e.sprite.y - e.sprite.displayHeight / 2 - (e.bar ? 42 : 18);
       keys.forEach((k, i) => {
         const b  = e.statusIcons[i];
         const cx = e.sprite.x - rowW / 2 + BADGE / 2 + i * (BADGE + GAP);
@@ -3117,6 +3119,7 @@ class GameScene extends Phaser.Scene {
               .setPosition(cx + BADGE / 2 + 3, top + BADGE / 2 + 3);
       });
     };
+    (this.rangedDummies || []).forEach(mark);
     (this.zombies || []).forEach(mark);
     (this.guards  || []).forEach(mark);
     // The Emperor is deliberately absent: his statuses are drawn larger,
