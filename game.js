@@ -2951,11 +2951,13 @@ class GameScene extends Phaser.Scene {
     // refresh — and the SKINS menu is login-only, so they can't even wear
     // it in the meantime.  Worth saying plainly at the moment they earn it.
     if (!getSessionUsername()) {
-      const warnY = H / 2 + 48 * U;
-      const plate = this.add.rectangle(W / 2, warnY, 420 * U, 34 * U, 0x1e2340, 0.85)
+      const warn = mk(48, 14, "Guests can't wear skins — make an account to keep this one", '#ffd54f');
+      // Plate measured off the text rather than a fixed width, so
+      // rewording the message can't leave it hanging over the edges.
+      const plate = this.add.rectangle(W / 2, warn.y,
+          warn.displayWidth + 26 * U, warn.displayHeight + 12 * U, 0x1e2340, 0.85)
         .setStrokeStyle(2 * U, 0xffd54f)
         .setScrollFactor(0).setDepth(1299).setAlpha(0);
-      const warn = mk(48, 14, 'Make an account or log in to keep the skin!', '#ffd54f');
       reveal.push(plate, warn);
     }
     this.tweens.add({ targets: reveal, alpha: 1, duration: 500, delay: 700 });
