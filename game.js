@@ -200,8 +200,8 @@ const ELEMENT_TREE = [
 
   { id: 'lava',    label: 'Lava',    type: 'Fire',  parents: ['fire'],           cost: 1,    row: 1 },
   { id: 'tsunami', label: 'Tsunami', type: 'Water', parents: ['water'],          cost: null, row: 1 },
-  { id: 'wind',    label: 'Wind',    type: 'Air',   parents: ['air'],            cost: null, row: 1 },
-  { id: 'cloud',   label: 'Cloud',   type: 'Air',   parents: ['air'],            cost: null, row: 1 },
+  { id: 'wind',    label: 'Wind',    type: 'Air',   parents: ['air'],            cost: 1,    row: 1 },
+  { id: 'cloud',   label: 'Cloud',   type: 'Air',   parents: ['air'],            cost: 1,    row: 1 },
 
   { id: 'heat',    label: 'Heat',    type: 'Fire',  parents: ['fire', 'air'],    cost: null, row: 2 },
   { id: 'ash',     label: 'Ash',     type: 'Fire',  parents: ['fire', 'earth'],  cost: null, row: 2 },
