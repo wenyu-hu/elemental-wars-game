@@ -919,6 +919,10 @@ class MenuScene extends Phaser.Scene {
     };
 
     const startGame = () => this.scene.start('MapScene');
+    // Held here so the skin picker can hide it: it's created after both
+    // branches, so it isn't in mainMenuObjects and would otherwise stay
+    // on screen underneath the panel's BACK button.
+    let menuHint = null;
 
     if (user) {
       const mainMenuObjects = [titleText, subtitleText];
@@ -947,8 +951,14 @@ class MenuScene extends Phaser.Scene {
       const cardW = 104, cardH = 148, gap = 12;
       const rowW  = cardW * SKINS.length + gap * (SKINS.length - 1);
       const cardsY = height / 2 + 10;
-      const startX = 28 + cardW / 2;
-      const profX  = 590;
+      // The picker was laid out for a 800px canvas: cards from x28, panel
+      // centred at 590, so the group spans 28-760.  A touch canvas is
+      // wider, so shift the whole group to keep it centred rather than
+      // stranding it against the left edge.  Zero at 800, so desktop is
+      // untouched.
+      const groupShift = Math.max(0, (width - 800) / 2);
+      const startX = 28 + cardW / 2 + groupShift;
+      const profX  = 590 + groupShift;
 
       panelObjects.push(this.add.text(width / 2, 52, 'Skins', {
         fontSize: '24px', fontFamily: '"Arial Black", Arial, sans-serif',
@@ -1063,13 +1073,18 @@ class MenuScene extends Phaser.Scene {
 
       // Sits between the profile card's bottom edge (~400) and the
       // controls footer (~456) so it collides with neither.
-      const backBtn = makeBtn(height / 2 + 175, 'BACK', '#8c8c8c', '#6c6c6c', () => hideSkinPicker());
+      // +175 put BACK's top edge exactly on the profile panel's bottom
+      // (the panel is 300 tall centred at height/2+10, so it ends at +160).
+      // +205 clears it with room to spare and still sits well inside the
+      // 480px canvas.
+      const backBtn = makeBtn(height / 2 + 205, 'BACK', '#8c8c8c', '#6c6c6c', () => hideSkinPicker());
       panelObjects.push(backBtn);
       refreshProfile();
       panelObjects.forEach(o => o.setVisible(false));
 
       function showSkinPicker() {
         mainMenuObjects.forEach(o => o.setVisible(false));
+        if (menuHint) menuHint.setVisible(false);
         panelObjects.forEach(o => o.setVisible(true));
         // Blanket-showing the panel also un-hides the per-card "worn"
         // ticks, so re-apply the state-driven visibility afterwards.
@@ -1078,6 +1093,7 @@ class MenuScene extends Phaser.Scene {
       function hideSkinPicker() {
         panelObjects.forEach(o => o.setVisible(false));
         mainMenuObjects.forEach(o => o.setVisible(true));
+        if (menuHint) menuHint.setVisible(true);
       }
     } else {
       makeBtn(height/2 + 10, 'LOG IN', '#3b9fff', '#1e7ae5', () => {
@@ -1092,7 +1108,7 @@ class MenuScene extends Phaser.Scene {
       this.input.keyboard.once('keydown-SPACE', startGame);
     }
 
-    this.add.text(width/2, height-24,
+    menuHint = this.add.text(width/2, height-24,
       'Arrow keys / WASD  ·  ↑/W = jump (×2)  ·  ↓/S = duck  ·  E or , = attack',
       { fontSize:'11px', fontFamily:'monospace', color:'#2d6a4f' }
     ).setOrigin(0.5);
@@ -3983,6 +3999,16 @@ class GameScene extends Phaser.Scene {
   update(time, delta) {
     // Frozen when paused — physics.world is also paused so entities stay put
     if (this._paused) return;
+
+    // A touch button that is hidden, destroyed, or has its scene restarted
+    // while held never receives its pointerup, which strands its virtual
+    // key down.  That is worst for 't': the block branch sits ahead of
+    // jump, duck and attack in updatePlayer and returns, so a stuck block
+    // silently locks out all three while still looking like it works.
+    // If no pointer is down, nothing can legitimately be held.
+    if (this.virtualKeys && !this.input.manager.pointers.some(p => p.isDown)) {
+      for (const key in this.virtualKeys) this.virtualKeys[key] = false;
+    }
 
     // These always run — even during dialog
     this._updateInstructionBoxes();
