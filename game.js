@@ -3672,7 +3672,12 @@ class GameScene extends Phaser.Scene {
     const H  = this.scale.height;  // 480
     const BH = 110;                // box height
     const BX = 0;
-    const BY = H - BH;            // flush to bottom edge
+    // Flush to the bottom on desktop, whose HUD is a narrow strip the box
+    // can sit under.  The touch HUD starts at y370 and spans the full
+    // width, which buries a bottom-flush box completely — so lift it to
+    // just above the bars instead.
+    const TOUCH_HUD_TOP = 370;
+    const BY = touchControlsOn() ? TOUCH_HUD_TOP - BH - 8 : H - BH;
     const BW = W;                  // full width
     const PS = 110;                // portrait square width (= BH so it's square)
 
@@ -6085,6 +6090,16 @@ class HUDScene extends Phaser.Scene {
     }
     this._updateBossStatusIcons(showBoss ? boss : null);
     if (this._actionBtns) this._refreshActionIcons();
+
+    // Controls do nothing while a dialogue box is up — input is frozen and
+    // a tap anywhere advances it — and they'd sit right on top of the box,
+    // so take them off screen for its duration.
+    const dialogUp = !!(gs._dialog && gs._dialog.active);
+    if (dialogUp !== this._touchHiddenForDialog) {
+      this._touchHiddenForDialog = dialogUp;
+      if (dialogUp) (this._touchBtns || []).forEach(o => o.setVisible(false));
+      else          this._applyTouchControlVisibility();
+    }
 
     // XP bar + level
     this.xpFill.displayWidth = (gs._xp / gs._xpToNext) * this._BAR_W;
