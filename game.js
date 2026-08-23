@@ -6437,7 +6437,11 @@ if (IS_TOUCH_DEVICE) {
     const want = computeGameW();
     if (Math.abs(want - GAME_W) < 8) return;    // ignore browser-chrome jitter
     GAME_W = want;
-    window._ewGame.scale.resize(GAME_W, GAME_H);
+    // setGameSize, not resize: under Scale.FIT, resize() changes the
+    // internal size without recomputing the canvas's CSS size, so the two
+    // aspects diverge and everything renders horizontally squashed.
+    // refresh() does not recover it either.
+    window._ewGame.scale.setGameSize(GAME_W, GAME_H);
     const gs = window._ewGame.scene.getScene('GameScene');
     if (gs && gs.cameras && gs.cameras.main) gs.cameras.main.setZoom(gameZoom());
     const hud = window._ewGame.scene.getScene('HUDScene');
