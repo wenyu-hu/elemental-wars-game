@@ -563,6 +563,31 @@ function logOut() {
 // the right lifetime for a guest session.
 const guestProgress = {};
 
+// Folds a guest run into the account just signed into.  Additive and
+// one-directional: booleans are OR'd and numbers take the higher value,
+// so signing into an established save can never roll it back — a guest
+// who beat the EX level keeps the skin, but their level 0 doesn't wipe
+// the account's level 4.  Returns how many fields moved.
+function migrateGuestProgress() {
+  if (!getSessionUsername()) return 0;
+  const user = (typeof currentUser === 'function') ? currentUser() : null;
+  const existing = (user && user.progress) || {};
+  const update = {};
+  for (const [k, v] of Object.entries(guestProgress)) {
+    const cur = existing[k];
+    if (typeof v === 'number') {
+      if (typeof cur !== 'number' || v > cur) update[k] = v;
+    } else if (v && !cur) {
+      update[k] = v;
+    }
+  }
+  const moved = Object.keys(update).length;
+  if (moved) saveProgress(update);
+  // The run now belongs to the account; don't leave a copy behind.
+  for (const k of Object.keys(guestProgress)) delete guestProgress[k];
+  return moved;
+}
+
 // Merge-save so we never downgrade fields (e.g. keeps level1Star=true if
 // the player replays without collecting the star).
 function saveProgress(update) {
@@ -2959,6 +2984,44 @@ class GameScene extends Phaser.Scene {
         .setStrokeStyle(2 * U, 0xffd54f)
         .setScrollFactor(0).setDepth(1299).setAlpha(0);
       reveal.push(plate, warn);
+
+      // ── Claim it, without leaving the victory screen ──────────────
+      const authBtns = [];
+      const claim = (mode) => {
+        // The form is a DOM overlay over a live scene, so typing a
+        // username would otherwise also drive the player.
+        this.input.keyboard.enabled = false;
+        const restore = () => { this.input.keyboard.enabled = true; };
+        showAuthForm({
+          mode,
+          onCancel: restore,
+          onSuccess: () => {
+            restore();
+            const moved = migrateGuestProgress();
+            authBtns.forEach(b => b.destroy());
+            authBtns.length = 0;
+            warn.setText(`Saved to ${getSessionUsername()} — ${moved} unlock${moved === 1 ? '' : 's'} kept`)
+                .setColor('#7CFC64');
+            plate.setStrokeStyle(2 * U, 0x7CFC64);
+            plate.displayWidth = warn.displayWidth + 26 * U;
+          },
+        });
+      };
+      const mkBtn = (dx, label, bg, mode) => {
+        const t = this.add.text(W / 2 + dx * U, warn.y + 36 * U, `  ${label}  `, {
+          fontSize: `${Math.round(13 * U)}px`,
+          fontFamily: '"Arial Black", Arial, sans-serif',
+          color: '#ffffff', backgroundColor: bg,
+          padding: { x: Math.round(12 * U), y: Math.round(7 * U) },
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(1300).setAlpha(0)
+          .setInteractive({ useHandCursor: true });
+        t.on('pointerup', () => claim(mode));
+        authBtns.push(t);
+        reveal.push(t);
+        return t;
+      };
+      mkBtn(-78, 'MAKE ACCOUNT', '#4caf50', 'signup');
+      mkBtn(78,  'LOG IN',       '#3b9fff', 'login');
     }
     this.tweens.add({ targets: reveal, alpha: 1, duration: 500, delay: 700 });
   }
