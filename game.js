@@ -199,7 +199,7 @@ const ELEMENT_TREE = [
   { id: 'earth',   label: 'Earth',   type: 'Earth', parents: [],                 cost: 1,    row: 0 },
 
   { id: 'lava',    label: 'Lava',    type: 'Fire',  parents: ['fire'],           cost: 1,    row: 1 },
-  { id: 'tsunami', label: 'Tsunami', type: 'Water', parents: ['water'],          cost: null, row: 1 },
+  { id: 'tsunami', label: 'Tsunami', type: 'Water', parents: ['water'],          cost: 1,    row: 1 },
   { id: 'wind',    label: 'Wind',    type: 'Air',   parents: ['air'],            cost: 1,    row: 1 },
   { id: 'cloud',   label: 'Cloud',   type: 'Air',   parents: ['air'],            cost: 1,    row: 1 },
 
