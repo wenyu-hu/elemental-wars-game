@@ -179,6 +179,68 @@ function activeStatuses(e) {
 }
 
 // ─────────────────────────────────────────────
+//  Element tree
+// ─────────────────────────────────────────────
+// Only the elements that exist plus their immediate locked neighbours —
+// a node qualifies once every one of its parents is already on the board.
+// Adding the rest of element-tree.md later is data, not code.
+//
+//   parents  []          a basic: nothing to evolve from
+//            [a]         an evolution of a
+//            [a, b]      a combination of a and b
+//   cost     null        price not decided yet; renders "?" and can never
+//                        be afforded, so unpriced nodes can sit on the
+//                        board without being reachable
+//   row      which band it draws in: 0 basics, 1 evolutions, 2 combinations
+const ELEMENT_TREE = [
+  { id: 'fire',    label: 'Fire',    type: 'Fire',  parents: [],                 cost: 1,    row: 0 },
+  { id: 'water',   label: 'Water',   type: 'Water', parents: [],                 cost: 1,    row: 0 },
+  { id: 'air',     label: 'Air',     type: 'Air',   parents: [],                 cost: 1,    row: 0 },
+  { id: 'earth',   label: 'Earth',   type: 'Earth', parents: [],                 cost: 1,    row: 0 },
+
+  { id: 'lava',    label: 'Lava',    type: 'Fire',  parents: ['fire'],           cost: 1,    row: 1 },
+  { id: 'tsunami', label: 'Tsunami', type: 'Water', parents: ['water'],          cost: null, row: 1 },
+  { id: 'wind',    label: 'Wind',    type: 'Air',   parents: ['air'],            cost: null, row: 1 },
+  { id: 'cloud',   label: 'Cloud',   type: 'Air',   parents: ['air'],            cost: null, row: 1 },
+
+  { id: 'heat',    label: 'Heat',    type: 'Fire',  parents: ['fire', 'air'],    cost: null, row: 2 },
+  { id: 'ash',     label: 'Ash',     type: 'Fire',  parents: ['fire', 'earth'],  cost: null, row: 2 },
+  { id: 'mud',     label: 'Mud',     type: 'Earth', parents: ['water', 'earth'], cost: null, row: 2 },
+  { id: 'mist',    label: 'Mist',    type: 'Water', parents: ['water', 'air'],   cost: null, row: 2 },
+];
+
+const ELEMENT_NODE = Object.fromEntries(ELEMENT_TREE.map(n => [n.id, n]));
+
+// How many unlocks deep a node sits — 0 for a basic, otherwise one past
+// its deepest parent.  Drives hotbar ordering.
+function elementDepth(id, seen = new Set()) {
+  const n = ELEMENT_NODE[id];
+  if (!n || !n.parents.length || seen.has(id)) return 0;
+  seen.add(id);
+  return 1 + Math.max(...n.parents.map(p => elementDepth(p, seen)));
+}
+
+// Unlockable once every parent is owned and the price is both set and
+// affordable.  A basic has no parents, so it only waits on the points.
+// Hotbar order is derived, never hand-managed: shallowest first, ties
+// broken by acquisition order, so Lava always sits behind every basic
+// however early it was bought.  `owned` is kept in acquisition order.
+function hotbarOrder(owned) {
+  return [...owned].sort((a, b) => {
+    const d = elementDepth(a) - elementDepth(b);
+    return d !== 0 ? d : owned.indexOf(a) - owned.indexOf(b);
+  });
+}
+
+function canUnlockElement(id, owned, points) {
+  const n = ELEMENT_NODE[id];
+  if (!n || owned.includes(id)) return false;
+  if (n.cost == null) return false;
+  if (!n.parents.every(p => owned.includes(p))) return false;
+  return points >= n.cost;
+}
+
+// ─────────────────────────────────────────────
 //  EX level availability
 // ─────────────────────────────────────────────
 // The anniversary bonus level runs as a post-event: it appears on the
@@ -912,6 +974,7 @@ class MenuScene extends Phaser.Scene {
     this.registry.set('level1Star',        !!progress.level1Star);
     this.registry.set('level1ChestOpened', !!progress.level1ChestOpened || preExistingCompleter);
     this.registry.set('level2ChestAOpened', !!progress.level2ChestAOpened);
+    this.registry.set('level2ChestBOpened', !!progress.level2ChestBOpened);
     this.registry.set('isGuest',        !user);
 
     // Hydrate the status sheet from saved progress (or reset to blank for guest/logged-out).
@@ -1240,11 +1303,19 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    // Hotbar — 10 slots, filled left-to-right one at a time on level-up.
-    // Each filled slot is { element, cooldownRemaining }; empty = null.
-    const _savedHotbar = Array.isArray(_saved.hotbar) ? _saved.hotbar : [];
-    this._hotbar = new Array(10).fill(null).map((_, i) =>
-      _savedHotbar[i] ? { element: _savedHotbar[i], cooldownRemaining: 0 } : null);
+    // Elements owned, in acquisition order, and points left to spend.
+    // Both live in saved progress — the status sheet only mirrors the
+    // point count for display, so there's one source of truth.
+    this._ownedElements = Array.isArray(_saved.ownedElements) ? [..._saved.ownedElements] : [];
+    this._boosterPoints = Number(_saved.boosterPoints) || 0;
+    // Older saves recorded a hotbar directly, before elements were owned
+    // separately — treat whatever was in it as the acquisition order.
+    if (!this._ownedElements.length && Array.isArray(_saved.hotbar)) {
+      this._ownedElements = _saved.hotbar.filter(Boolean);
+    }
+    // Hotbar — 10 slots, derived from what's owned rather than stored.
+    this._hotbar = new Array(10).fill(null);
+    this._rebuildHotbar();
     // Block state — set true while the player holds T or '/'
     this._blocking = false;
 
@@ -1541,7 +1612,11 @@ class GameScene extends Phaser.Scene {
     // element system existed: their hotbar is still empty even though
     // they've already "earned" a pick. Show the choice screen once,
     // shortly after load, instead of only on live level-up events.
-    if (this._levelNum === 2 && this._level >= 1 && this._hotbar.every(s => !s)) {
+    // Gated on having neither points nor elements, not just an empty
+    // hotbar: the screen now grants a Booster Point, so an empty-handed
+    // player re-entering level 2 would otherwise farm one per visit.
+    if (this._levelNum === 2 && this._level >= 1
+        && !this._ownedElements.length && this._boosterPoints === 0) {
       this.time.delayedCall(600, () => {
         if (this._chestSequenceActive) return;   // don't clash with an active cinematic
         this._chestSequenceActive = true;
@@ -4883,15 +4958,16 @@ class GameScene extends Phaser.Scene {
       duration: 120, yoyo: true, repeat: 2 });
     this._setCheckpoint(c.sprite.x - 80, c.sprite.y - 30);
 
-    const firstChestA = c.tag === 'A' && !this.registry.get('level2ChestAOpened');
-    if (firstChestA) {
-      this.registry.set('level2ChestAOpened', true);
-      saveProgress({ level2ChestAOpened: true });
-      this._playChestSequence({
-        xpGain: 10,
-        itemId: 'wooden_shield',
-        itemTextureKey: 'item_wooden_shield',
-      });
+    // Every chest pays the same 10 XP on its first open, so the level-up
+    // beat doesn't depend on any one chest granting a special amount.
+    const openedKey = `level2Chest${c.tag}Opened`;
+    const firstOpen = !this.registry.get(openedKey);
+    if (firstOpen) {
+      this.registry.set(openedKey, true);
+      saveProgress({ [openedKey]: true });
+      this._playChestSequence(c.tag === 'A'
+        ? { xpGain: 10, itemId: 'wooden_shield', itemTextureKey: 'item_wooden_shield' }
+        : { xpGain: 10 });
     } else {
       this.checkpointText.setVisible(true);
       this.time.delayedCall(1800, () => this.checkpointText.setVisible(false));
@@ -5312,69 +5388,285 @@ class GameScene extends Phaser.Scene {
   // "You leveled up! Choose a basic element." — dim screen + 4 bordered
   // icon squares (Fire/Water/Air/Earth). Clicking one drops it into the
   // next empty hotbar slot and persists it, then calls done().
-  _playElementChoiceScreen(done) {
-    const emptySlot = this._hotbar.findIndex(s => !s);
-    if (emptySlot === -1) { done(); return; }   // hotbar full — nothing to assign
+  // Lays the owned elements into the 10 slots in derived order, keeping
+  // any live cooldowns so a rebuild mid-fight can't refresh everything.
+  _rebuildHotbar() {
+    const cooling = {};
+    for (const s of this._hotbar || []) {
+      if (s) cooling[s.element] = s.cooldownRemaining || 0;
+    }
+    const order = hotbarOrder(this._ownedElements);
+    this._hotbar = new Array(10).fill(null);
+    order.slice(0, 10).forEach((el, i) => {
+      this._hotbar[i] = { element: el, cooldownRemaining: cooling[el] || 0 };
+    });
+  }
 
+  _saveElementState() {
+    saveProgress({
+      ownedElements: [...this._ownedElements],
+      boosterPoints: this._boosterPoints,
+      // Kept for older code paths that still read a flat hotbar.
+      hotbar: this._hotbar.map(s => s ? s.element : null),
+    });
+    this._syncBoosterToSheet();
+  }
+
+  // The inventory shows the point count; the game owns the number.
+  _syncBoosterToSheet() {
+    if (window.statusSheet && window.statusSheet.setStat) {
+      window.statusSheet.setStat('booster', this._boosterPoints);
+    }
+  }
+
+  _unlockElement(id) {
+    if (!canUnlockElement(id, this._ownedElements, this._boosterPoints)) return false;
+    this._boosterPoints -= ELEMENT_NODE[id].cost;
+    this._ownedElements.push(id);          // acquisition order matters
+    this._rebuildHotbar();
+    this._saveElementState();
+    return true;
+  }
+
+  // The element tree.  Owned nodes are lit, affordable ones carry a white
+  // glow, the rest sit dark.  Clicking any node fills the side tab.
+  // Drawn in GameScene like the other overlays, so every coordinate is
+  // scaled by 1/zoom to come out at its intended size.
+  openElementTree(onClose) {
+    if (this._treeOpen) return;
+    this._treeOpen = true;
+    const W = this.scale.width, H = this.scale.height;
+    const cam = this.cameras.main;
+    const U = 1 / cam.zoom;
+    const CX = W / 2, CY = H / 2;
+    const D = 1400;
+    const at = (dx, dy) => [CX + dx * U, CY + dy * U];
+    const fs = px => `${Math.round(px * U)}px`;
+    const FONT = '"Arial Black", Arial, sans-serif';
+    const layer = [];
+    const add = o => { o.setScrollFactor(0).setDepth(D); layer.push(o); return o; };
+
+    add(this.add.rectangle(CX, CY, W * U, H * U, 0x05060c, 0.92));
+    add(this.add.text(...at(-250, -186), 'ELEMENT TREE', {
+      fontSize: fs(20), fontFamily: FONT, color: '#ffd700',
+    }).setOrigin(0, 0.5));
+    const pts = add(this.add.text(...at(-250, -160), '', {
+      fontSize: fs(12), fontFamily: FONT, color: '#9fe8ff',
+    }).setOrigin(0, 0.5));
+
+    // ── Node placement: radial, growing outward from the basics ──
+    // A grid reads as a spreadsheet; a tree should look like it grew.
+    // Basics ring a centre point, each child sits further out along its
+    // parents' bearing, and siblings fan apart so they don't stack.
+    // Jitter is hashed off the element id, so it's irregular but fixed —
+    // the same node lands in the same place every time the tree opens.
+    const BOX = 44;
+    const ORIGIN = [-116, -6];
+    const R0 = 58, RSTEP = 66;
+    const hash = (str) => {
+      let h = 0;
+      for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
+      return Math.abs(h);
+    };
+    const jitter = (id, salt, amp) => ((hash(id + salt) % 1000) / 1000 - 0.5) * 2 * amp;
+
+    const angle = {}, pos = {};
+    const basics = ELEMENT_TREE.filter(n => !n.parents.length);
+    basics.forEach((n, i) => {
+      // -0.9 rad start keeps the ring off a plumb cross.
+      angle[n.id] = -0.9 + (i / basics.length) * Math.PI * 2 + jitter(n.id, 'a', 0.18);
+    });
+
+    const seatedAt = {};                 // bearing -> how many already fanned
+    ELEMENT_TREE.filter(n => n.parents.length).forEach(n => {
+      // Circular mean of the parents' bearings, so a combination sits
+      // between the two things it came from.
+      const sx = n.parents.reduce((a, p) => a + Math.cos(angle[p] || 0), 0);
+      const sy = n.parents.reduce((a, p) => a + Math.sin(angle[p] || 0), 0);
+      let a = Math.atan2(sy, sx);
+      const key = n.parents.slice().sort().join('+');
+      const seat = seatedAt[key] = (seatedAt[key] || 0) + 1;
+      // Siblings off the same parents alternate either side of the bearing.
+      a += (seat === 1 ? 0 : (seat % 2 ? 1 : -1) * 0.30 * Math.ceil((seat - 1) / 2));
+      angle[n.id] = a + jitter(n.id, 'b', 0.10);
+    });
+
+    ELEMENT_TREE.forEach(n => {
+      const r = R0 + elementDepth(n.id) * RSTEP + jitter(n.id, 'r', 9);
+      pos[n.id] = [ORIGIN[0] + Math.cos(angle[n.id]) * r,
+                   ORIGIN[1] + Math.sin(angle[n.id]) * r];
+    });
+
+    // Bearings only fan apart siblings off the same parents, so nodes
+    // from different branches can still land on each other.  Relax:
+    // repeatedly shove any overlapping pair apart along the line between
+    // them.  Keeps the irregular placement while guaranteeing clearance.
+    const MIN = BOX + 16;
+    const ids = ELEMENT_TREE.map(n => n.id);
+    for (let pass = 0; pass < 80; pass++) {
+      let moved = false;
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          const a = pos[ids[i]], b = pos[ids[j]];
+          const dx = b[0] - a[0], dy = b[1] - a[1];
+          const d = Math.hypot(dx, dy) || 0.001;
+          if (d >= MIN) continue;
+          const push = (MIN - d) / 2, ux = dx / d, uy = dy / d;
+          a[0] -= ux * push; a[1] -= uy * push;
+          b[0] += ux * push; b[1] += uy * push;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+
+    // ── Connection lines, drawn under the nodes ──
+    const wires = add(this.add.graphics().setDepth(D - 1));
+    ELEMENT_TREE.forEach(n => {
+      n.parents.forEach(pid => {
+        if (!pos[pid]) return;
+        const owned = this._ownedElements.includes(n.id);
+        wires.lineStyle(2 * U, owned ? 0xffd700 : 0x39405c, owned ? 0.9 : 0.7);
+        const [x1, y1] = at(pos[pid][0], pos[pid][1]);
+        const [x2, y2] = at(pos[n.id][0], pos[n.id][1]);
+        wires.beginPath(); wires.moveTo(x1, y1); wires.lineTo(x2, y2); wires.strokePath();
+      });
+    });
+
+    // ── Side tab ──
+    const TABX = 196;
+    add(this.add.rectangle(...at(TABX, -6), 200 * U, 300 * U, 0x141a2e, 0.96)
+      .setStrokeStyle(2 * U, 0x39405c));
+    const tabName = add(this.add.text(...at(TABX, -128), 'Select a node', {
+      fontSize: fs(15), fontFamily: FONT, color: '#ffffff', align: 'center',
+      wordWrap: { width: 180 * U },
+    }).setOrigin(0.5));
+    const tabBody = add(this.add.text(...at(TABX, -40), '', {
+      fontSize: fs(11), fontFamily: FONT, color: '#c9d2e6', align: 'center',
+      lineSpacing: 6 * U, wordWrap: { width: 180 * U },
+    }).setOrigin(0.5, 0));
+    const buyBtn = add(this.add.text(...at(TABX, 106), '  UNLOCK  ', {
+      fontSize: fs(13), fontFamily: FONT, color: '#ffffff',
+      backgroundColor: '#4caf50', padding: { x: 10 * U, y: 6 * U },
+    }).setOrigin(0.5).setVisible(false).setInteractive({ useHandCursor: true }));
+
+    let selected = null;
+    const boxes = {};
+
+    const paint = () => {
+      pts.setText(`Booster Points: ${this._boosterPoints}`);
+      ELEMENT_TREE.forEach(n => {
+        const b = boxes[n.id];
+        const owned = this._ownedElements.includes(n.id);
+        const afford = canUnlockElement(n.id, this._ownedElements, this._boosterPoints);
+        b.rect.setFillStyle(owned ? 0x2b2f45 : 0x11131f, 1);
+        // Gold = owned, white glow = affordable now, otherwise dormant.
+        b.rect.setStrokeStyle((afford ? 3 : 2) * U,
+          owned ? 0xffd700 : afford ? 0xffffff : 0x39405c, owned || afford ? 1 : 0.8);
+        b.icon.setAlpha(owned ? 1 : 0.25);
+        b.label.setColor(owned ? '#ffd700' : afford ? '#ffffff' : '#6b7390');
+      });
+      if (!selected) { buyBtn.setVisible(false); return; }
+      const n = ELEMENT_NODE[selected];
+      const owned = this._ownedElements.includes(n.id);
+      const afford = canUnlockElement(n.id, this._ownedElements, this._boosterPoints);
+      const prereq = !n.parents.length
+        ? 'Basic element'
+        : n.parents.length === 1
+          ? `Evolves from ${ELEMENT_NODE[n.parents[0]].label}`
+          : `${n.parents.map(p => ELEMENT_NODE[p].label).join(' + ')}`;
+      tabName.setText(n.label);
+      tabBody.setText([
+        `${n.type}-type`,
+        '',
+        prereq,
+        '',
+        owned ? 'Owned' : `Cost: ${n.cost == null ? '?' : n.cost + ' BP'}`,
+      ].join('\n'));
+      buyBtn.setVisible(!owned && afford);
+    };
+
+    ELEMENT_TREE.forEach(n => {
+      const [dx, dy] = pos[n.id];
+      const [bx, by] = at(dx, dy);
+      const rect = add(this.add.rectangle(bx, by, BOX * U, BOX * U, 0x11131f)
+        .setInteractive({ useHandCursor: true }));
+      const def = ELEMENT_DEFS[n.id];
+      // Elements without art yet show their initial rather than nothing.
+      const icon = def && this.textures.exists(def.icon)
+        ? add(this.add.sprite(bx, by - 3 * U, def.icon, 0).setScale(1.1 * U))
+        : add(this.add.text(bx, by - 3 * U, n.label[0], {
+            fontSize: fs(18), fontFamily: FONT, color: '#ffffff',
+          }).setOrigin(0.5));
+      const label = add(this.add.text(bx, by + BOX / 2 * U - 7 * U, n.label, {
+        fontSize: fs(8), fontFamily: FONT, color: '#6b7390',
+      }).setOrigin(0.5));
+      rect._elId = n.id;              // so the node can be identified later
+      rect.on('pointerup', () => { selected = n.id; paint(); });
+      boxes[n.id] = { rect, icon, label };
+    });
+
+    buyBtn.on('pointerup', () => {
+      if (!selected || !this._unlockElement(selected)) return;
+      paint();
+    });
+
+    const close = add(this.add.text(...at(250, -186), '  CLOSE  ', {
+      fontSize: fs(13), fontFamily: FONT, color: '#ffffff',
+      backgroundColor: '#8c8c8c', padding: { x: 10 * U, y: 6 * U },
+    }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true }));
+    close.on('pointerup', () => {
+      this._treeOpen = false;
+      layer.forEach(o => o.destroy());
+      if (onClose) onClose();
+    });
+
+    paint();
+  }
+
+  // Level-up: hand over the point, then offer the tree.  Replaces the old
+  // four-element picker, which was a fixed one-shot version of the same
+  // choice — the tree does that job and every later one.
+  _playElementChoiceScreen(done) {
     const W = this.scale.width, H = this.scale.height;
     const cx = W / 2, cy = H / 2;
     const D  = 1000;
     const layer = [];
     const add = obj => { obj.setScrollFactor(0).setDepth(D); layer.push(obj); return obj; };
-
-    // Sized by 1/zoom: scrollFactor-0 objects are still scaled by the
-    // camera, so a W x H rectangle only covers zoom% of the screen and
-    // leaves the game visible around the edges.
     const U = 1 / this.cameras.main.zoom;
+
+    this._boosterPoints += 1;
+    this._saveElementState();
+
     const dim = add(this.add.rectangle(cx, cy, W * U, H * U, 0x000000, 0));
     this.tweens.add({ targets: dim, fillAlpha: 0.66, duration: 280, ease: 'Sine.easeOut' });
 
-    const msg = add(this.add.text(cx, cy - 90, 'You leveled up!\nChoose a basic element.', {
-      fontSize: '22px', fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffffff', stroke: '#000000', strokeThickness: 4, align: 'center',
+    const msg = add(this.add.text(cx, cy - 70 * U, 'You leveled up!', {
+      fontSize: `${Math.round(22 * U)}px`, fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', stroke: '#000000', strokeThickness: 4 * U, align: 'center',
     }).setOrigin(0.5).setAlpha(0));
-    this.tweens.add({ targets: msg, alpha: 1, duration: 320 });
-
-    const options = [
-      { key: 'fire',  icon: 'icon_fire',  label: 'Fire'  },
-      { key: 'water', icon: 'icon_water', label: 'Water' },
-      { key: 'air',   icon: 'icon_air',   label: 'Air'   },
-      { key: 'earth', icon: 'icon_earth', label: 'Earth' },
-    ];
-    const boxSize = 84, gap = 24;
-    const rowW = options.length * boxSize + (options.length - 1) * gap;
-    const startX = cx - rowW / 2 + boxSize / 2;
+    const bp = add(this.add.text(cx, cy - 30 * U, '+1 Booster Point!', {
+      fontSize: `${Math.round(16 * U)}px`, fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#9fe8ff', stroke: '#000000', strokeThickness: 3 * U,
+    }).setOrigin(0.5).setAlpha(0));
+    const btn = add(this.add.text(cx, cy + 34 * U, '  ELEMENTS  ', {
+      fontSize: `${Math.round(15 * U)}px`, fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', backgroundColor: '#9c6ade',
+      padding: { x: 14 * U, y: 8 * U },
+    }).setOrigin(0.5).setAlpha(0).setInteractive({ useHandCursor: true }));
+    this.tweens.add({ targets: [msg, bp, btn], alpha: 1, duration: 320 });
 
     let resolved = false;
-    const cleanup = () => layer.forEach(o => o.destroy());
-    const choose = (elKey) => {
+    const finish = () => {
       if (resolved) return;
       resolved = true;
-      this._hotbar[emptySlot] = { element: elKey, cooldownRemaining: 0 };
-      saveProgress({ hotbar: this._hotbar.map(s => s ? s.element : null) });
       this.tweens.add({
         targets: layer, alpha: 0, duration: 220,
-        onComplete: () => { cleanup(); done(); },
+        onComplete: () => { layer.forEach(o => o.destroy()); done(); },
       });
     };
-
-    options.forEach((opt, i) => {
-      const bx = startX + i * (boxSize + gap);
-      const box = add(this.add.rectangle(bx, cy + 30, boxSize, boxSize, 0x333333)
-        .setStrokeStyle(3, 0xffffff)
-        .setInteractive({ useHandCursor: true })
-        .setAlpha(0));
-      const icon = add(this.add.sprite(bx, cy + 18, opt.icon, 0).setScale(1.6).setAlpha(0));
-      icon.play(opt.icon);
-      const label = add(this.add.text(bx, cy + 30 + boxSize / 2 - 14, opt.label, {
-        fontSize: '13px', fontFamily: '"Arial Black", Arial, sans-serif',
-        color: '#ffffff', stroke: '#000000', strokeThickness: 3,
-      }).setOrigin(0.5).setAlpha(0));
-      this.tweens.add({ targets: [box, icon, label], alpha: 1, duration: 320, delay: 120 + i * 60, ease: 'Back.easeOut' });
-      box.on('pointerover', () => box.setFillStyle(0x4a4a4a));
-      box.on('pointerout',  () => box.setFillStyle(0x333333));
-      box.on('pointerup',   () => choose(opt.key));
-    });
+    // The tree draws above this screen and hands control back on close.
+    btn.on('pointerup', () => this.openElementTree(finish));
   }
 
   reachPortal() {
@@ -6008,20 +6300,33 @@ class HUDScene extends Phaser.Scene {
     this._buildTouchControls(W, H);
 
     // ── PAUSED overlay (hidden by default) ────────
-    this.pausedText = this.add.text(W / 2, H / 2 - 40, 'PAUSED', {
+    this.pausedText = this.add.text(W / 2, H / 2 - 70, 'PAUSED', {
       fontSize: '48px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff', stroke: '#000000', strokeThickness: 6,
     }).setOrigin(0.5).setVisible(false);
 
     // Exit back to the map.  Only reachable while paused, so it can't be
     // hit mid-fight by accident.
-    this.exitBtn = this.add.text(W / 2, H / 2 + 30, '  EXIT TO MAP  ', {
+    this.exitBtn = this.add.text(W / 2, H / 2 + 34, '  EXIT TO MAP  ', {
       fontSize: '20px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff', backgroundColor: '#c0392b', padding: { x: 18, y: 9 },
     }).setOrigin(0.5).setVisible(false).setInteractive({ useHandCursor: true });
     this.exitBtn.on('pointerover', () => this.exitBtn.setStyle({ backgroundColor: '#e04b39' }));
     this.exitBtn.on('pointerout',  () => this.exitBtn.setStyle({ backgroundColor: '#c0392b' }));
     this.exitBtn.on('pointerup',   () => this._exitToMap());
+
+    // Tree from the pause menu too — banking a point and wanting to spend
+    // it, or just looking at what's coming, shouldn't need a level-up.
+    this.treeBtn = this.add.text(W / 2, H / 2 - 12, '  ELEMENT TREE  ', {
+      fontSize: '20px', fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffffff', backgroundColor: '#9c6ade', padding: { x: 18, y: 9 },
+    }).setOrigin(0.5).setVisible(false).setInteractive({ useHandCursor: true });
+    this.treeBtn.on('pointerover', () => this.treeBtn.setStyle({ backgroundColor: '#b184e8' }));
+    this.treeBtn.on('pointerout',  () => this.treeBtn.setStyle({ backgroundColor: '#9c6ade' }));
+    this.treeBtn.on('pointerup',   () => {
+      const gs = this._gs;
+      if (gs && !gs._treeOpen) gs.openElementTree();
+    });
 
     // Touch-control toggle — auto-detects by default, but a phone that
     // reports the wrong pointer type, or a desktop player who wants to
@@ -6032,7 +6337,7 @@ class HUDScene extends Phaser.Scene {
                   : p === 'on'   ? 'On' : 'Off';
       return `  Touch controls: ${state}  `;
     };
-    this.touchToggle = this.add.text(W / 2, H / 2 + 84, labelFor(), {
+    this.touchToggle = this.add.text(W / 2, H / 2 + 78, labelFor(), {
       fontSize: '15px', fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff', backgroundColor: '#3f4a63', padding: { x: 14, y: 7 },
     }).setOrigin(0.5).setVisible(false).setInteractive({ useHandCursor: true });
@@ -6040,7 +6345,7 @@ class HUDScene extends Phaser.Scene {
     // a fit problem on a device that can't be tested here (an iPhone Pro
     // Max, say) can be read straight off the screen.  "fills" is the one
     // that matters: anything but yes means letterboxing.
-    this.fitReadout = this.add.text(W / 2, H / 2 + 116, '', {
+    this.fitReadout = this.add.text(W / 2, H / 2 + 110, '', {
       fontSize: '10px', fontFamily: 'monospace',
       color: '#c9d2e6', backgroundColor: '#00000066', padding: { x: 8, y: 5 },
       align: 'center',
@@ -6077,6 +6382,8 @@ class HUDScene extends Phaser.Scene {
     this.pauseIcon.setText(paused ? '▶' : '⏸');
     this.pausedText.setVisible(paused);
     this.exitBtn.setVisible(paused);
+    // Hidden while the tree is up, or it would sit on top of it.
+    this.treeBtn.setVisible(paused && !gs._treeOpen);
     const showFit = paused && touchControlsOn();
     this.fitReadout.setVisible(showFit);
     if (showFit) {
