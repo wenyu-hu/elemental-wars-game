@@ -6504,12 +6504,18 @@ class HUDScene extends Phaser.Scene {
       this.hotbarSlots.forEach((s, i) => {
         const slot = gs._hotbar[i];
         if (!slot) { s.icon.setVisible(false); s.darken.setVisible(false); s.reloadBar.setVisible(false); return; }
+        // The tree can hand out an element before its ELEMENT_DEFS entry
+        // and art exist — Lava, Wind and Cloud are unlockable today with
+        // no definition behind them.  Show the slot as occupied but
+        // artless rather than reaching into an undefined def, which threw
+        // and killed the whole game loop.
         const def = ELEMENT_DEFS[slot.element];
         if (s.element !== slot.element) {
           s.element = slot.element;
-          s.icon.setVisible(true).play(def.icon);
+          if (def) s.icon.setVisible(true).play(def.icon);
+          else     s.icon.setVisible(false);
         }
-        const onCooldown = slot.cooldownRemaining > 0;
+        const onCooldown = def && slot.cooldownRemaining > 0;
         s.darken.setVisible(onCooldown);
         s.reloadBar.setVisible(onCooldown);
         if (onCooldown) {
