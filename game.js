@@ -2945,7 +2945,20 @@ class GameScene extends Phaser.Scene {
       }).setOrigin(0.5).setScrollFactor(0).setDepth(1300).setAlpha(0);
     const a = mk(-30, 34, 'THE EMPEROR FALLS', '#ffd700');
     const b = mk(10, 18, 'Gold skin unlocked!', '#ffffff');
-    this.tweens.add({ targets: [a, b], alpha: 1, duration: 500, delay: 700 });
+    const reveal = [a, b];
+
+    // A guest's progress lives in memory only, so this unlock is gone on
+    // refresh — and the SKINS menu is login-only, so they can't even wear
+    // it in the meantime.  Worth saying plainly at the moment they earn it.
+    if (!getSessionUsername()) {
+      const warnY = H / 2 + 48 * U;
+      const plate = this.add.rectangle(W / 2, warnY, 420 * U, 34 * U, 0x1e2340, 0.85)
+        .setStrokeStyle(2 * U, 0xffd54f)
+        .setScrollFactor(0).setDepth(1299).setAlpha(0);
+      const warn = mk(48, 14, 'Make an account or log in to keep the skin!', '#ffd54f');
+      reveal.push(plate, warn);
+    }
+    this.tweens.add({ targets: reveal, alpha: 1, duration: 500, delay: 700 });
   }
 
   _createRangedDummy(x, y) {
