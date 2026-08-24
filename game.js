@@ -4500,13 +4500,30 @@ class GameScene extends Phaser.Scene {
   // A geyser doesn't travel: it bursts out of the floor a fixed distance
   // ahead, stands for a moment, then subsides.  Anchored bottom-centre so
   // it grows upward out of the ground rather than about its middle.
+  // Topmost solid surface under `x` at or below `fromY` — i.e. the first
+  // floor something dropped from there would land on.  Falls back to the
+  // world's own ground line when the column is over a pit.
+  _surfaceBelow(x, fromY) {
+    let best = null;
+    const kids = this.platforms ? this.platforms.getChildren() : [];
+    for (const o of kids) {
+      if (!o.active) continue;
+      const b = o.getBounds();
+      if (x < b.left || x > b.right) continue;
+      if (b.top < fromY - 4) continue;            // above the caster
+      if (best === null || b.top < best) best = b.top;
+    }
+    return best !== null ? best : fromY;
+  }
+
   _eruptGeyser(def) {
     const ps = this.player.sprite;
     const dir = ps.flipX ? 1 : -1;
     const x = ps.x + dir * def.range * TS;
-    // Erupts from whatever the player is standing on, so it lines up with
-    // the floor rather than hanging in the air on a raised platform.
-    const groundY = ps.body.bottom;
+    // Erupts from the ground under its *own* column, not the caster's.
+    // Using the player's feet meant casting from a platform left the
+    // geyser hanging in mid-air wherever it landed.
+    const groundY = this._surfaceBelow(x, ps.body.bottom);
 
     const g = this.physics.add.sprite(x, groundY, def.icon, 0)
       .setOrigin(0.5, 1)
