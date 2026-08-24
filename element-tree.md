@@ -41,7 +41,7 @@ else is design only.
 
 | Element | Type | Parents | Dmg | Distance | Size | Duration | Reload | Effect |
 |---|---|---|---|---|---|---|---|---|
-| **Lava** | Fire | Fire (evo) | 5 | 10 tiles, fixed | 1 tile wide | ~1s lingering | 5s | Burn II |
+| **Lava** | Fire | Fire (evo) | 5 | 5 tiles, fixed | 1 tile wide | ~1s lingering | 5s | Burn II |
 | **Explosion** | Fire | Fire + Destruction | 15 | 4 tiles | 3-tile radius | instant | 15s | Burn III. No self-damage. |
 | **Destruction** | — | — (basic, mid-game) | 20 | *4 tiles?* | *4-tile radius?* | instant | 15s | Widest blast in the game |
 | **Tsunami** | Water | Water (evo) | 5 | sweeps whole floor | — | — | 5s | Knockback II |

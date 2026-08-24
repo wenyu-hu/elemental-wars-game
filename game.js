@@ -31,7 +31,7 @@ const ELEMENT_DEFS = {
   // Lava erupts from the ground a fixed distance ahead rather than
   // flying — `geyser` switches _fireElementInSlot onto that path, where
   // `range` is where it lands rather than how far it travels.
-  lava:  { icon: 'icon_lava',  damage: 5, range: 10, reload: 5000, scale: 1.0, geyser: true, lingerMs: 1000, burst: [0xffd28a, 0xff6a1f, 0xd83c10, 0x8a1f08], burn: 2 },
+  lava:  { icon: 'icon_lava',  damage: 5, range: 5,  reload: 5000, scale: 1.0, geyser: true, lingerMs: 1000, burst: [0xffd28a, 0xff6a1f, 0xd83c10, 0x8a1f08], burn: 2 },
   earth: { icon: 'icon_earth', damage: 8, range: 15, reload: 5000, speed: 560, scale: 0.9, burst: [0xc9b083, 0x9c7f4e, 0x6f5a33, 0x4a3c22], hugsGround: true },
 };
 
