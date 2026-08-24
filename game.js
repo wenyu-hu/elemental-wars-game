@@ -5581,7 +5581,11 @@ class GameScene extends Phaser.Scene {
         '',
         prereq,
         '',
-        owned ? 'Owned' : `Cost: ${n.cost == null ? '?' : n.cost + ' BP'}`,
+        // An unpriced node isn't expensive, it just doesn't exist yet —
+        // say so, rather than showing a '?' that reads as a hidden price.
+        owned ? 'Owned'
+              : n.cost == null ? 'Not designed yet'
+              : `Cost: ${n.cost} BP`,
       ].join('\n'));
       buyBtn.setVisible(!owned && afford);
     };
