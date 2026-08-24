@@ -28,6 +28,10 @@ const ELEMENT_DEFS = {
   // full-frame body had at scale 0.6 — so it keeps the generous feel
   // that made it land, but the puff now visibly fills what it hits.
   air:   { icon: 'icon_air',   damage: 1, range: 5,  reload: 500,  speed: 320, scale: 2.4, burst: [0xffffff, 0xe6f4ff, 0xc9e4f7, 0xa9cfe8], knockback: 320 },
+  // Lava erupts from the ground a fixed distance ahead rather than
+  // flying — `geyser` switches _fireElementInSlot onto that path, where
+  // `range` is where it lands rather than how far it travels.
+  lava:  { icon: 'icon_lava',  damage: 5, range: 10, reload: 5000, scale: 1.0, geyser: true, lingerMs: 1000, burst: [0xffd28a, 0xff6a1f, 0xd83c10, 0x8a1f08], burn: 2 },
   earth: { icon: 'icon_earth', damage: 8, range: 15, reload: 5000, speed: 560, scale: 0.9, burst: [0xc9b083, 0x9c7f4e, 0x6f5a33, 0x4a3c22], hugsGround: true },
 };
 
@@ -856,6 +860,8 @@ class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('icon_water', 'assets/elements/Water.png', { frameWidth: 32, frameHeight: 32 });
     this.load.spritesheet('icon_air',   'assets/elements/Air.png',   { frameWidth: 32, frameHeight: 32 });
     this.load.spritesheet('icon_earth', 'assets/elements/Earth.png', { frameWidth: 32, frameHeight: 32 });
+    // Lava is a geyser, not a projectile — tall frames, not square ones.
+    this.load.spritesheet('icon_lava',  'assets/elements/Lava.png',  { frameWidth: 32, frameHeight: 64 });
   }
 
   create() {
@@ -926,6 +932,7 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('bow',           0x884422, 2, 32, 32);
     makeSheet('icon_fire',     0xff5522, 2, 32, 32);
     makeSheet('icon_water',    0x3399ff, 3, 32, 32);
+    makeSheet('icon_lava',     0xff6a1f, 2, 32, 64);
     makeSheet('icon_air',      0xeeeeee, 1, 32, 32);
     makeSheet('icon_earth',    0x77aa44, 3, 32, 32);
   }
@@ -3808,6 +3815,7 @@ class GameScene extends Phaser.Scene {
     add('icon_water', 'icon_water', 0, 2, 6);
     add('icon_air',   'icon_air',   0, 0, 6);
     add('icon_earth', 'icon_earth', 0, 2, 6);
+    add('icon_lava',  'icon_lava',  0, 1, 8);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -4489,6 +4497,65 @@ class GameScene extends Phaser.Scene {
 
   // Fire whichever element sits in hotbar slot `idx` (0-based). Called by
   // key-press handling in _tryFireElement and by HUD slot clicks.
+  // A geyser doesn't travel: it bursts out of the floor a fixed distance
+  // ahead, stands for a moment, then subsides.  Anchored bottom-centre so
+  // it grows upward out of the ground rather than about its middle.
+  _eruptGeyser(def) {
+    const ps = this.player.sprite;
+    const dir = ps.flipX ? 1 : -1;
+    const x = ps.x + dir * def.range * TS;
+    // Erupts from whatever the player is standing on, so it lines up with
+    // the floor rather than hanging in the air on a raised platform.
+    const groundY = ps.body.bottom;
+
+    const g = this.physics.add.sprite(x, groundY, def.icon, 0)
+      .setOrigin(0.5, 1)
+      .setScale(SCALE * (def.scale || 1))
+      .setDepth(11);
+    g.play(def.icon);
+    g.body.setAllowGravity(false);
+    g.body.setImmovable(true);
+    this._fitBodyToTexture(g, { frame: 0 });
+    // setOrigin doesn't move the body, so line it up by hand.
+    g.body.setOffset(g.body.offset.x, g.body.offset.y - g.height);
+
+    const mods = (SKINS.find(sk => sk.key === this._skin) || {}).mods || {};
+    const opts = {
+      burn: def.burn,
+      effectMul: mods.elementEffect || 1,
+      knockback: 0,
+    };
+    const dmg = Math.round(def.damage * (mods.elementDamage || 1));
+
+    // One hit per enemy per eruption, so standing in it isn't a grinder.
+    const struck = new Set();
+    const sweep = () => {
+      if (!g.active) return;
+      const gb = g.getBounds();
+      const hit = (e, fn) => {
+        if (!e || e.dead || struck.has(e)) return;
+        if (Phaser.Geom.Intersects.RectangleToRectangle(gb, e.sprite.getBounds())) {
+          struck.add(e);
+          fn();
+        }
+      };
+      (this.zombies || []).forEach(z => hit(z, () => this._hitZombie(z, dmg, x, opts)));
+      (this.guards  || []).forEach(gd => hit(gd, () => this._hitGuard(gd, dmg, x, opts)));
+      (this.rangedDummies || []).forEach(rd => hit(rd, () => {
+        this._applyHitEffects(rd, opts); this._damageRangedDummy(rd, dmg);
+      }));
+      if (this.emperor) hit(this.emperor, () => this._hitEmperor(dmg, opts));
+    };
+    const timer = this.time.addEvent({ delay: 60, loop: true, callback: sweep });
+
+    this.time.delayedCall(def.lingerMs || 1000, () => {
+      timer.remove();
+      if (!g.active) return;
+      this._burstPixels(g.x, g.y - g.displayHeight / 2, def.burst || [0xffffff]);
+      g.destroy();
+    });
+  }
+
   _fireElementInSlot(idx) {
     if (!this.elementProjectiles) return;
     const slot = this._hotbar && this._hotbar[idx];
@@ -4496,6 +4563,8 @@ class GameScene extends Phaser.Scene {
     const def = ELEMENT_DEFS[slot.element];
     if (!def) return;
     slot.cooldownRemaining = def.reload;
+
+    if (def.geyser) { this._eruptGeyser(def); return; }
 
     const ps = this.player.sprite;
     const dir = ps.flipX ? 1 : -1;
