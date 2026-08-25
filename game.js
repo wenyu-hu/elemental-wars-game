@@ -23,11 +23,12 @@ const TS    = TILE * SCALE;   // 96px display per tile
 const ELEMENT_DEFS = {
   fire:  { icon: 'icon_fire',  damage: 3, range: 10, reload: 3000, speed: 380, scale: 1.2, burst: [0xffd28a, 0xffa640, 0xff6a1f, 0xd83c10], burn: 1 },
   water: { icon: 'icon_water', damage: 2, range: 8,  reload: 2000, speed: 420, scale: 1.2, burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd], hugsGround: true, knockback: 260 },
-  // Air's art is only 8x8 inside its 32x32 frame.  scale 2.4 makes the
-  // cropped hitbox 8*3*2.4 = 57.6px — the same size the old uncropped
-  // full-frame body had at scale 0.6 — so it keeps the generous feel
-  // that made it land, but the puff now visibly fills what it hits.
-  air:   { icon: 'icon_air',   damage: 1, range: 5,  reload: 500,  speed: 320, scale: 2.4, burst: [0xffffff, 0xe6f4ff, 0xc9e4f7, 0xa9cfe8], knockback: 320 },
+  // Air's art is only 8x8 inside its 32x32 frame, and the cropped hitbox
+  // is that painted area — so this scale sets how forgiving Air is to aim
+  // as well as how big it looks.  Dropped from 2.4 (57.6px) to 2.0 (48px)
+  // to open a clear size gap against Wind's 72px, at the cost of some of
+  // the generosity that suits a 1-damage, half-second-reload element.
+  air:   { icon: 'icon_air',   damage: 1, range: 5,  reload: 500,  speed: 320, scale: 2.0, burst: [0xffffff, 0xe6f4ff, 0xc9e4f7, 0xa9cfe8], knockback: 320 },
   // Lava erupts from the ground a fixed distance ahead rather than
   // flying — `geyser` switches _fireElementInSlot onto that path, where
   // `range` is where it lands rather than how far it travels.
