@@ -43,6 +43,10 @@ const ELEMENT_DEFS = {
   // tier table for it is still unset, so 450 is just clearly above Air's
   // 320.  The jump boost isn't wired yet.
   wind:  { icon: 'icon_wind',  damage: 2, range: 8,  reload: 1500, speed: 480, scale: 1.5, burst: [0xffffff, 0xe6f4ff, 0xc9e4f7, 0xa9cfe8], knockback: 450 },
+  // Cloud is a placed area, not a shot: it hangs where you put it and
+  // enemies standing in it lose track of you.  `area` picks that path,
+  // where `range` is how far ahead it lands and `width` is how wide.
+  cloud: { icon: 'icon_cloud', damage: 0, range: 3,  reload: 5000, scale: 2.2, area: true, width: 4, lingerMs: 4000, unAggro: true, burst: [0xffffff, 0xe8eef5, 0xd0d8e2, 0xb7b7b7] },
   earth: { icon: 'icon_earth', damage: 8, range: 15, reload: 5000, speed: 560, scale: 0.9, burst: [0xc9b083, 0x9c7f4e, 0x6f5a33, 0x4a3c22], hugsGround: true },
 };
 
@@ -874,6 +878,7 @@ class PreloadScene extends Phaser.Scene {
     // Lava is a geyser, not a projectile — tall frames, not square ones.
     this.load.spritesheet('icon_lava',  'assets/elements/Lava.png',  { frameWidth: 32, frameHeight: 64 });
     this.load.spritesheet('icon_wind',  'assets/elements/Wind.png',  { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('icon_cloud', 'assets/elements/Cloud.png', { frameWidth: 32, frameHeight: 32 });
   }
 
   create() {
@@ -946,6 +951,7 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('icon_water',    0x3399ff, 3, 32, 32);
     makeSheet('icon_lava',     0xff6a1f, 2, 32, 64);
     makeSheet('icon_wind',     0xffffff, 1, 32, 32);
+    makeSheet('icon_cloud',    0xdddddd, 1, 32, 32);
     makeSheet('icon_air',      0xeeeeee, 1, 32, 32);
     makeSheet('icon_earth',    0x77aa44, 3, 32, 32);
   }
@@ -2197,7 +2203,7 @@ class GameScene extends Phaser.Scene {
 
       // Out of aggro: hold position, unaware of the player, glancing
       // around every few seconds rather than staring at them.
-      if (dist > cfg.aggroRange) {
+      if (dist > cfg.aggroRange || z._blind) {
         s.body.setVelocityX(0);
         s.anims.play(A + '_idle', true);
         z.turnTimer -= delta;
@@ -2391,7 +2397,7 @@ class GameScene extends Phaser.Scene {
       const dx   = ps.x - s.x;
       const dist = Math.abs(dx);
 
-      if (dist > GUARD.aggroRange) {
+      if (dist > GUARD.aggroRange || g._blind) {
         s.body.setVelocityX(0);
         s.anims.play('gg_idle', true);
         g.turnTimer -= delta;
@@ -3830,6 +3836,7 @@ class GameScene extends Phaser.Scene {
     add('icon_earth', 'icon_earth', 0, 2, 6);
     add('icon_lava',  'icon_lava',  0, 1, 8);
     add('icon_wind',  'icon_wind',  0, 0, 6);
+    add('icon_cloud', 'icon_cloud', 0, 0, 6);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -4219,6 +4226,7 @@ class GameScene extends Phaser.Scene {
     this.updateDummyBar();
     this._checkDummyProximity();
     this._checkPatrolDummyProximity();
+    this._updateAreas();
     this._updateElements(delta);
     this._updateBlockInput();
     this._updateLevel2(delta);
@@ -4547,6 +4555,64 @@ class GameScene extends Phaser.Scene {
     return best !== null ? best : fromY;
   }
 
+  // A placed area: several overlapping puffs so a 4-tile span reads as
+  // one cloud rather than one sprite stretched six times over.  Enemies
+  // standing inside stop tracking the player for as long as it lasts.
+  _placeArea(def) {
+    const ps = this.player.sprite;
+    const dir = ps.flipX ? 1 : -1;
+    const spanW = (def.width || 4) * TS;
+    const cx = ps.x + dir * (def.range || 3) * TS;
+    const cy = ps.body.bottom - TS * 0.9;      // hangs at head height
+
+    const puffs = [];
+    const N = 3;
+    for (let i = 0; i < N; i++) {
+      const t = N === 1 ? 0.5 : i / (N - 1);
+      const px = cx - spanW / 2 + t * spanW;
+      const py = cy + (i % 2 ? 10 : -8);       // stagger so it isn't a row
+      const p = this.add.sprite(px, py, def.icon, 0)
+        .setScale(SCALE * (def.scale || 2)).setDepth(9).setAlpha(0);
+      p.play(def.icon);
+      this.tweens.add({ targets: p, alpha: 0.92, duration: 220 });
+      // Drift gently so it looks alive rather than pasted on.
+      this.tweens.add({ targets: p, x: px + (i % 2 ? 6 : -6), duration: 1800,
+                        yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      puffs.push(p);
+    }
+
+    const zone = new Phaser.Geom.Rectangle(cx - spanW / 2, cy - TS / 2, spanW, TS);
+    const area = { zone, unAggro: !!def.unAggro, until: this.time.now + (def.lingerMs || 4000) };
+    (this._areas = this._areas || []).push(area);
+
+    this.time.delayedCall(def.lingerMs || 4000, () => {
+      const i = this._areas.indexOf(area);
+      if (i >= 0) this._areas.splice(i, 1);
+      // Anything it was hiding starts noticing the player again.
+      [...(this.zombies || []), ...(this.guards || [])].forEach(e => { if (e) e._blind = false; });
+      this.tweens.add({ targets: puffs, alpha: 0, duration: 260,
+                        onComplete: () => puffs.forEach(p => p.destroy()) });
+    });
+  }
+
+  // Marks anything standing in an un-aggro area, so the enemy update can
+  // treat it as having lost sight of the player.  Cleared every frame and
+  // re-applied, so leaving the cloud restores tracking immediately.
+  _updateAreas() {
+    const list = this._areas || [];
+    const all = [...(this.zombies || []), ...(this.guards || [])];
+    if (!list.length) {
+      for (const e of all) if (e && e._blind) e._blind = false;
+      return;
+    }
+    for (const e of all) {
+      if (!e || e.dead || !e.sprite) continue;
+      const b = e.sprite.getBounds();
+      e._blind = list.some(a => a.unAggro
+        && Phaser.Geom.Intersects.RectangleToRectangle(a.zone, b));
+    }
+  }
+
   _eruptGeyser(def) {
     const ps = this.player.sprite;
     const dir = ps.flipX ? 1 : -1;
@@ -4613,6 +4679,7 @@ class GameScene extends Phaser.Scene {
     slot.cooldownRemaining = def.reload;
 
     if (def.geyser) { this._eruptGeyser(def); return; }
+    if (def.area)   { this._placeArea(def);   return; }
 
     const ps = this.player.sprite;
     const dir = ps.flipX ? 1 : -1;
