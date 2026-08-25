@@ -22,17 +22,17 @@ const TS    = TILE * SCALE;   // 96px display per tile
 // height — that's what makes the water shot look like a wave.
 const ELEMENT_DEFS = {
   fire:  { icon: 'icon_fire',  damage: 3, range: 10, reload: 3000, speed: 380, scale: 1.2, burst: [0xffd28a, 0xffa640, 0xff6a1f, 0xd83c10], burn: 1 },
-  water: { icon: 'icon_water', damage: 2, range: 8,  reload: 2000, speed: 420, scale: 1.2, burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd], hugsGround: true, knockback: 260 },
+  water: { icon: 'icon_water', damage: 2, range: 8,  reload: 2000, speed: 420, scale: 1.2, burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd], hugsGround: true, knockback: 160 },
   // Air's art is only 8x8 inside its 32x32 frame, and the cropped hitbox
   // is that painted area — so this scale sets how forgiving Air is to aim
   // as well as how big it looks.  Dropped from 2.4 (57.6px) to 2.0 (48px)
   // to open a clear size gap against Wind's 72px, at the cost of some of
   // the generosity that suits a 1-damage, half-second-reload element.
-  // Knockback is halved from 320 against its half-second reload: at that
-  // fire rate Air was delivering 640 knockback per second, twice what
-  // Wind manages, so the spam element out-shoved the one built for it.
-  // 160 also puts it under Water's 260, which is the order the tier
-  // labels always implied.
+  // Knockback I is 160, shared by Water and Air: they carry the same tier
+  // label, so they carry the same number, and the difference between them
+  // lives in damage, range and fire rate instead.  Air came down from 320
+  // because at a half-second reload it was delivering 640 knockback per
+  // second, twice what Wind manages at its own tier.
   air:   { icon: 'icon_air',   damage: 1, range: 5,  reload: 500,  speed: 320, scale: 2.0, burst: [0xffffff, 0xe6f4ff, 0xc9e4f7, 0xa9cfe8], knockback: 160 },
   // Lava erupts from the ground a fixed distance ahead rather than
   // flying — `geyser` switches _fireElementInSlot onto that path, where

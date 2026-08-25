@@ -26,8 +26,8 @@ else is design only.
 | Element | Type | Parents | Dmg | Range | Speed | Flight | Reload | Effect |
 |---|---|---|---|---|---|---|---|---|
 | **Fire** | Fire | — (basic) | 3 | 10 | 380 | 0.84s | 3s | Burn I |
-| **Water** | Water | — (basic) | 2 | 8 | 420 | 0.61s | 2s | Knockback I |
-| **Air** | Air | — (basic) | 1 | 5 | 320 | 0.50s | 0.5s | Knockback I |
+| **Water** | Water | — (basic) | 2 | 8 | 420 | 0.61s | 2s | Knockback I (160) |
+| **Air** | Air | — (basic) | 1 | 5 | 320 | 0.50s | 0.5s | Knockback I (160) |
 | **Earth** | Earth | — (basic) | 8 | 15 | 560 | 0.86s | 5s | — |
 | **Ice** | Ice | — (basic) | 0 | 3 | 480 | 0.20s | 5s | Freeze III |
 | **Heat** | Fire | Fire + Air | 1 | 5 | 480 | 0.33s | 1.5s | Burn III |
@@ -120,7 +120,7 @@ one**, and a lower tier does **nothing at all** — it cannot even refresh the d
 | **Freeze** (duration) | 1s | 2s | 3s |
 | **Freeze** (shatter ×) | 1.2× | 1.4× | 1.6× |
 | **Stun** (duration) | 0.5s | 1s | 1.5s |
-| **Knockback** (value) | *pending* | *pending* | *pending* |
+| **Knockback** (value) | **160** | *pending* | *pending* |
 
 Tiers IV and V exist for all effects but are **reserved for late-game equipment** — no element
 uses them.
@@ -140,7 +140,10 @@ stacks of Poison V, so low-tier poison never becomes dead weight.
 *Open:* stacks should share one refreshed timer rather than each tracking its own expiry.
 
 > Burn I is the only tier in code: `{ ticks: 3, dmgPerTick: 1, tickMs: 1000 }`.
-> Knockback still needs renumbering — Water is 260 and Air is 320 but both are labelled I.
+> **Knockback I is 160**, shared by Water and Air: same tier label, same number, with the
+> difference between them living in damage, range and fire rate. Air came down from 320
+> because at a half-second reload it delivered 640 knockback per second — twice Wind's rate
+> at a higher tier. Wind sits at a provisional 450; tiers II and III are still unset.
 > **Burn's duration does nothing on an element whose reload is shorter than it** — Heat
 > re-applies Burn III every 1.5s against a 5s duration, so only the DPS half matters there.
 
@@ -208,8 +211,8 @@ What it rules out is knocking back a target that is *already* frozen.
 
 All 38 elements are specified. What remains:
 
-1. **Knockback tier values** — the only effect table still unset. Water is 260 and Air is 320
-   in code but both are labelled I; Tornado needs a value too.
+1. **Knockback tiers II and III** — tier I is settled at 160 (Water and Air). Wind uses a
+   provisional 450 and Tornado has no value yet.
 2. Remaining italic cells are Claude's proposals awaiting a ruling — mostly radii, reloads and
    damage values rather than anything that changes how an element plays.
 3. EX level's Golden Door logic needs edits before Wind's jump boost is final.
