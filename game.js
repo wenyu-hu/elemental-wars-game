@@ -380,6 +380,14 @@ const BOW = {
   minRange:    2  * TS,
   maxRange:    14 * TS,
   damage:      1,
+  // A quarter of the world's 600.  Enough to see the arc — a full-power
+  // shot drops about 1.7 tiles across its range — without turning the bow
+  // into a mortar.  Note this makes the range figures above a ceiling
+  // rather than a promise: fired level, an arrow meets the ground around
+  // 7 tiles out, and only reaches 14 if you aim it upward.  Applied by
+  // hand rather than through body gravity so this number is the real one.
+  gravity:     150,
+  scale:       2,        // 24x7 art -> 48x14 on screen, about a player wide
 };
 
 // Touch equivalent of the X-key shortcut into the EX level.
@@ -4259,7 +4267,7 @@ class GameScene extends Phaser.Scene {
     this._checkPatrolDummyProximity();
     this._updateAreas();
     this._updateBow(delta);
-    this._updateArrows();
+    this._updateArrows(delta);
     this._updateElements(delta);
     this._updateBlockInput();
     this._updateLevel2(delta);
@@ -4749,6 +4757,14 @@ class GameScene extends Phaser.Scene {
     this._updateBowSprite();
   }
 
+  // The lead hand, matching where the shield overlay sits so held items
+  // all agree on where the player's grip is.
+  _handPoint() {
+    const s = this.player.sprite;
+    const dir = s.flipX ? 1 : -1;
+    return { x: s.x + dir * 14, y: s.y + 8 };
+  }
+
   _hasBow() {
     const eq = window.statusSheet && window.statusSheet.getState().equipment;
     return !!(eq && eq.rangedWeapon && eq.rangedWeapon.itemId);
@@ -4792,8 +4808,9 @@ class GameScene extends Phaser.Scene {
     const t = (this._drawMs || 0) / BOW.drawMs;
     // 0 idle, 1 drawing, 2 fully taut — frame 3 is the release lurch.
     b.setFrame(t >= 0.99 ? 2 : t > 0.25 ? 1 : 0);
+    const hand = this._handPoint();
     b.setVisible(true)
-     .setPosition(ps.x + Math.cos(ang) * 26, ps.y + Math.sin(ang) * 26)
+     .setPosition(hand.x, hand.y)
      .setRotation(ang)
      .setFlipY(Math.cos(ang) < 0);   // keep the grip below the string
   }
@@ -4805,9 +4822,17 @@ class GameScene extends Phaser.Scene {
     const speed = Phaser.Math.Linear(BOW.minSpeed, BOW.maxSpeed, t);
     const range = Phaser.Math.Linear(BOW.minRange, BOW.maxRange, t);
 
-    this.arrows = this.arrows || this.physics.add.group({ allowGravity: false });
-    const a = this.arrows.create(ps.x + Math.cos(ang) * 30, ps.y + Math.sin(ang) * 30, 'item_arrow');
-    a.setScale(SCALE).setDepth(12).setRotation(ang);
+    if (!this.arrows) {
+      this.arrows = this.physics.add.group({ allowGravity: false });
+      // An arcing arrow that sailed through the floor looked wrong, so
+      // terrain stops it.
+      if (this.platforms) {
+        this.physics.add.collider(this.arrows, this.platforms, a => a.destroy());
+      }
+    }
+    const hand = this._handPoint();
+    const a = this.arrows.create(hand.x + Math.cos(ang) * 18, hand.y + Math.sin(ang) * 18, 'item_arrow');
+    a.setScale(SCALE * BOW.scale / 3).setDepth(12).setRotation(ang);
     a.body.setAllowGravity(false);
     a.body.setVelocity(Math.cos(ang) * speed, Math.sin(ang) * speed);
     this._fitBodyToTexture(a);
@@ -4824,10 +4849,14 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  _updateArrows() {
-    if (!this.arrows) return;
+  _updateArrows(delta) {
+    if (!this.arrows || !this.arrows.children) return;
     this.arrows.children.iterate(a => {
       if (!a || !a.active) return;
+      // Arc under gravity, and point the way it's actually travelling —
+      // without this the arrow slides sideways as it falls.
+      a.body.velocity.y += BOW.gravity * (delta / 1000);
+      a.setRotation(Math.atan2(a.body.velocity.y, a.body.velocity.x));
       // Spent once it has flown its range.
       if (Phaser.Math.Distance.Between(a.x, a.y, a._spentAt.x, a._spentAt.y) > a._range) {
         a.destroy();
