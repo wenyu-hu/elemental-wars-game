@@ -22,7 +22,7 @@ const TS    = TILE * SCALE;   // 96px display per tile
 // height — that's what makes the water shot look like a wave.
 const ELEMENT_DEFS = {
   fire:  { icon: 'icon_fire',  damage: 3, range: 10, reload: 3000, speed: 380, scale: 1.2, burst: [0xffd28a, 0xffa640, 0xff6a1f, 0xd83c10], burn: 1 },
-  water: { icon: 'icon_water', damage: 2, range: 8,  reload: 2000, speed: 420, scale: 1.2, burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd], hugsGround: true, knockback: 160 },
+  water: { icon: 'icon_water', damage: 2, range: 10,  reload: 2000, speed: 420, scale: 1.2, burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd], hugsGround: true, knockback: 160 },
   // Air's art is only 8x8 inside its 32x32 frame, and the cropped hitbox
   // is that painted area — so this scale sets how forgiving Air is to aim
   // as well as how big it looks.  Dropped from 2.4 (57.6px) to 2.0 (48px)
@@ -4250,6 +4250,23 @@ class GameScene extends Phaser.Scene {
     if (this.elementProjectiles) {
       this.elementProjectiles.children.iterate(pr => {
         if (!pr) return;
+        // Ground-huggers track the terrain instead of flying level from
+        // wherever they were born — firing off a ledge used to leave the
+        // shot hanging in mid-air at the height it started.  Riding
+        // exactly on the surface also makes the ride-over test reliable:
+        // it compares the solid's top against the shot's bottom, which
+        // was only sometimes true when the shot floated a few px high.
+        if (pr._hugsGround && pr.body && pr.active) {
+          // Tolerance of 24px so a shot born just under a lip snaps up
+          // onto it rather than diving to whatever floor is further down
+          // -- that mismatch is what made it burst on platforms at random.
+          const surf = this._surfaceBelow(pr.x, pr.body.bottom - 24);
+          const dy = surf - pr.body.bottom;
+          // Climbs a step instantly, but flows down a drop rather than
+          // teleporting to whatever floor is below.
+          const step = dy > 0 ? Math.min(dy, 10) : dy;
+          if (step !== 0) { pr.y += step; pr.body.updateFromGameObject(); }
+        }
         // Each shot has its own _maxX travel cap stored at spawn.
         if (pr._dir > 0 && pr.x > pr._maxX) pr.destroy();
         else if (pr._dir < 0 && pr.x < pr._maxX) pr.destroy();
