@@ -255,6 +255,11 @@ function canUnlockElement(id, owned, points) {
   const n = ELEMENT_NODE[id];
   if (!n || owned.includes(id)) return false;
   if (n.cost == null) return false;
+  // Priced but unbuilt is not for sale: without an ELEMENT_DEFS entry the
+  // slot fires nothing, so buying it would waste a Booster Point.  This
+  // decouples pricing from implementing — a cost can be set the moment
+  // it's decided, and the node opens up when the element actually works.
+  if (!ELEMENT_DEFS[id]) return false;
   if (!n.parents.every(p => owned.includes(p))) return false;
   return points >= n.cost;
 }
@@ -5795,6 +5800,7 @@ class GameScene extends Phaser.Scene {
         // say so, rather than showing a '?' that reads as a hidden price.
         owned ? 'Owned'
               : n.cost == null ? 'Not designed yet'
+              : !ELEMENT_DEFS[n.id] ? `Cost: ${n.cost} BP  (not built yet)`
               : `Cost: ${n.cost} BP`,
       ].join('\n'));
       buyBtn.setVisible(!owned && afford);
