@@ -28,7 +28,12 @@ const ELEMENT_DEFS = {
   // as well as how big it looks.  Dropped from 2.4 (57.6px) to 2.0 (48px)
   // to open a clear size gap against Wind's 72px, at the cost of some of
   // the generosity that suits a 1-damage, half-second-reload element.
-  air:   { icon: 'icon_air',   damage: 1, range: 5,  reload: 500,  speed: 320, scale: 2.0, burst: [0xffffff, 0xe6f4ff, 0xc9e4f7, 0xa9cfe8], knockback: 320 },
+  // Knockback is halved from 320 against its half-second reload: at that
+  // fire rate Air was delivering 640 knockback per second, twice what
+  // Wind manages, so the spam element out-shoved the one built for it.
+  // 160 also puts it under Water's 260, which is the order the tier
+  // labels always implied.
+  air:   { icon: 'icon_air',   damage: 1, range: 5,  reload: 500,  speed: 320, scale: 2.0, burst: [0xffffff, 0xe6f4ff, 0xc9e4f7, 0xa9cfe8], knockback: 160 },
   // Lava erupts from the ground a fixed distance ahead rather than
   // flying — `geyser` switches _fireElementInSlot onto that path, where
   // `range` is where it lands rather than how far it travels.
