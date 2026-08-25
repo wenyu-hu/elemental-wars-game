@@ -366,6 +366,22 @@ const DOOR = {
 // the extra pixels to the HUD, pushing both thumbs away from the action.
 // Measured off the long/short side rather than innerWidth/innerHeight so a
 // page that loads in portrait still sizes for the landscape it'll be played in.
+// One quiver of arrows.
+const QUIVER_SIZE = 20;
+
+// Bow: hold to draw, release to fire.  Range scales with how far it was
+// pulled, so a snap shot is short and a full draw carries.  Below
+// BOW_MIN_DRAW the shot is refused rather than dribbling out.
+const BOW = {
+  drawMs:      2000,     // hold time to a full pull
+  minDraw:     0.15,     // fraction below which releasing does nothing
+  minSpeed:    260,      // arrow speed at the minimum useful draw
+  maxSpeed:    900,      // at a full pull
+  minRange:    2  * TS,
+  maxRange:    14 * TS,
+  damage:      1,
+};
+
 // Touch equivalent of the X-key shortcut into the EX level.
 const EX_SPAM_TAPS  = 12;
 const EX_SPAM_MS    = 5000;
@@ -859,8 +875,9 @@ class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 14, frameHeight: 16 });
     this.load.image('item_wooden_sword',  'assets/items/Sword.png');
     this.load.image('item_wooden_shield', 'assets/items/Shield.png');
-    // Frame 0 of the two-frame bow sheet (drawn) reads best as an icon.
-    this.load.spritesheet('item_wooden_bow', 'assets/items/Bow.png', { frameWidth: 32, frameHeight: 32 });
+    // 4 frames: 0 idle, 1 drawing, 2 fully taut, 3 the release lurch.
+    this.load.spritesheet('item_wooden_bow', 'assets/items/Wooden Bow.png', { frameWidth: 32, frameHeight: 32 });
+    this.load.image('item_arrow', 'assets/items/Arrow.png');
     this.load.image('ground',   'assets/blocks/ground.png');
     this.load.image('dirt',     'assets/blocks/dirt.png');
     this.load.image('platform', 'assets/platform.png');
@@ -875,7 +892,7 @@ class PreloadScene extends Phaser.Scene {
     this.load.image('moving_platform', 'assets/Moving Platform.png');
     this.load.image('shield_overlay',  'assets/items/Shield.png');
     this.load.spritesheet('blue_fireball', 'assets/Blue_Fireball.png', { frameWidth: 32, frameHeight: 32 });
-    this.load.spritesheet('bow',           'assets/items/Bow.png',           { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('harp_bow',      'assets/items/Harp_Bow.png',      { frameWidth: 32, frameHeight: 32 });
     // Element icons — looping idle spritesheets, 32x32 frames. Reused for
     // both the hotbar/choice-screen icon and the fired projectile itself.
     this.load.spritesheet('icon_fire',  'assets/elements/Fire.png',  { frameWidth: 32, frameHeight: 32 });
@@ -953,7 +970,9 @@ class PreloadScene extends Phaser.Scene {
     makeImg  ('moving_platform', 0x8b5e3c, 32, 12);
     makeImg  ('shield_overlay',  0x886633, 32, 32);
     makeSheet('blue_fireball', 0x44aaff, 2, 32, 32);
-    makeSheet('bow',           0x884422, 2, 32, 32);
+    makeSheet('harp_bow',      0x884422, 2, 32, 32);
+    makeSheet('item_wooden_bow', 0x8b5a2b, 4, 32, 32);
+    makeImg  ('item_arrow',    0x8b5a2b, 24, 7);
     makeSheet('icon_fire',     0xff5522, 2, 32, 32);
     makeSheet('icon_water',    0x3399ff, 3, 32, 32);
     makeSheet('icon_lava',     0xff6a1f, 2, 32, 64);
@@ -1265,6 +1284,10 @@ class GameScene extends Phaser.Scene {
     this.rangedDummies = null;     // array of { sprite, hp, maxHp, dead, fireTimer }
     this.fireballs     = null;     // physics group — enemy projectiles
     this.elementProjectiles = null;// physics group — player element shots
+    // Cleared per run: _loose() creates this lazily with ||, so a stale
+    // reference from a previous life would survive a restart and every
+    // shot would go into a destroyed group.
+    this.arrows        = null;
     this.chestL2A      = null;     // first chest (shield + element-pick)
     this.chestL2B      = null;     // second chest (checkpoint)
     this.movingPlatform = null;    // moving platform sprite
@@ -1571,6 +1594,7 @@ class GameScene extends Phaser.Scene {
       e: Phaser.Input.Keyboard.KeyCodes.E,
       comma: Phaser.Input.Keyboard.KeyCodes.COMMA,
       t: Phaser.Input.Keyboard.KeyCodes.T,
+      r: Phaser.Input.Keyboard.KeyCodes.R,
       slash: Phaser.Input.Keyboard.KeyCodes.FORWARD_SLASH,
       one:   Phaser.Input.Keyboard.KeyCodes.ONE,
       two:   Phaser.Input.Keyboard.KeyCodes.TWO,
@@ -4234,6 +4258,8 @@ class GameScene extends Phaser.Scene {
     this._checkDummyProximity();
     this._checkPatrolDummyProximity();
     this._updateAreas();
+    this._updateBow(delta);
+    this._updateArrows();
     this._updateElements(delta);
     this._updateBlockInput();
     this._updateLevel2(delta);
@@ -4700,6 +4726,127 @@ class GameScene extends Phaser.Scene {
       if (!g.active) return;
       this._burstPixels(g.x, g.y - g.displayHeight / 2, def.burst || [0xffffff]);
       g.destroy();
+    });
+  }
+
+  // ── Bow ──────────────────────────────────────────────────────────
+  // Hold R to draw, release to loose.  The bow tracks the mouse, and how
+  // far it was pulled sets both the arrow's speed and how far it carries.
+  _updateBow(delta) {
+    const k = this.keys;
+    if (!k || !k.r) return;
+    const armed = this._hasBow() && this._arrowCount() > 0;
+
+    if (k.r.isDown && armed && !this._portalReached && !this._doorLockout) {
+      this._drawMs = Math.min(BOW.drawMs, (this._drawMs || 0) + delta);
+      this._drawing = true;
+    } else if (this._drawing) {
+      this._drawing = false;
+      const t = (this._drawMs || 0) / BOW.drawMs;
+      this._drawMs = 0;
+      if (t >= BOW.minDraw) this._loose(t);
+    }
+    this._updateBowSprite();
+  }
+
+  _hasBow() {
+    const eq = window.statusSheet && window.statusSheet.getState().equipment;
+    return !!(eq && eq.rangedWeapon && eq.rangedWeapon.itemId);
+  }
+
+  _arrowCount() {
+    const st = window.statusSheet && window.statusSheet.getState();
+    return ((st && st.arrows) || []).reduce((a, r) => a + (Number(r.qty) || 0), 0);
+  }
+
+  // Spend one arrow from the first stack that has any.
+  _takeArrow() {
+    const st = window.statusSheet && window.statusSheet.getState();
+    const row = ((st && st.arrows) || []).find(r => (Number(r.qty) || 0) > 0);
+    if (!row) return false;
+    window.statusSheet.addArrow(row.name, -1);
+    return true;
+  }
+
+  // Angle from the player to the mouse, in world space.
+  _aimAngle() {
+    const ps = this.player.sprite;
+    const p = this.input.activePointer;
+    const wx = p.worldX != null ? p.worldX : ps.x + 100;
+    const wy = p.worldY != null ? p.worldY : ps.y;
+    return Math.atan2(wy - ps.y, wx - ps.x);
+  }
+
+  // The bow itself, held in the aim direction and cycling frames as it's
+  // pulled.  Created lazily so nothing exists until a bow is equipped.
+  _updateBowSprite() {
+    const show = this._hasBow() && this._drawing;
+    if (!this._bowSprite) {
+      this._bowSprite = this.add.sprite(0, 0, 'item_wooden_bow', 0)
+        .setScale(SCALE).setDepth(12).setVisible(false);
+    }
+    const b = this._bowSprite;
+    if (!show) { b.setVisible(false); return; }
+    const ps = this.player.sprite;
+    const ang = this._aimAngle();
+    const t = (this._drawMs || 0) / BOW.drawMs;
+    // 0 idle, 1 drawing, 2 fully taut — frame 3 is the release lurch.
+    b.setFrame(t >= 0.99 ? 2 : t > 0.25 ? 1 : 0);
+    b.setVisible(true)
+     .setPosition(ps.x + Math.cos(ang) * 26, ps.y + Math.sin(ang) * 26)
+     .setRotation(ang)
+     .setFlipY(Math.cos(ang) < 0);   // keep the grip below the string
+  }
+
+  _loose(t) {
+    if (!this._takeArrow()) return;
+    const ps = this.player.sprite;
+    const ang = this._aimAngle();
+    const speed = Phaser.Math.Linear(BOW.minSpeed, BOW.maxSpeed, t);
+    const range = Phaser.Math.Linear(BOW.minRange, BOW.maxRange, t);
+
+    this.arrows = this.arrows || this.physics.add.group({ allowGravity: false });
+    const a = this.arrows.create(ps.x + Math.cos(ang) * 30, ps.y + Math.sin(ang) * 30, 'item_arrow');
+    a.setScale(SCALE).setDepth(12).setRotation(ang);
+    a.body.setAllowGravity(false);
+    a.body.setVelocity(Math.cos(ang) * speed, Math.sin(ang) * speed);
+    this._fitBodyToTexture(a);
+    a._spentAt = { x: a.x, y: a.y };
+    a._range = range;
+    a._struck = new Set();
+
+    // Show the string snapping forward for a moment after release.
+    if (this._bowSprite) {
+      this._bowSprite.setVisible(true).setFrame(3);
+      this.time.delayedCall(110, () => {
+        if (this._bowSprite && !this._drawing) this._bowSprite.setVisible(false);
+      });
+    }
+  }
+
+  _updateArrows() {
+    if (!this.arrows) return;
+    this.arrows.children.iterate(a => {
+      if (!a || !a.active) return;
+      // Spent once it has flown its range.
+      if (Phaser.Math.Distance.Between(a.x, a.y, a._spentAt.x, a._spentAt.y) > a._range) {
+        a.destroy();
+        return;
+      }
+      const ab = a.getBounds();
+      const hit = (e, fn) => {
+        if (!e || e.dead || a._struck.has(e) || !e.sprite) return false;
+        if (!Phaser.Geom.Intersects.RectangleToRectangle(ab, e.sprite.getBounds())) return false;
+        a._struck.add(e);
+        fn();
+        return true;
+      };
+      let landed = false;
+      (this.zombies || []).forEach(z => { landed = hit(z, () => this._hitZombie(z, BOW.damage, a.x, {})) || landed; });
+      (this.guards  || []).forEach(g => { landed = hit(g, () => this._hitGuard(g,  BOW.damage, a.x, {})) || landed; });
+      (this.rangedDummies || []).forEach(rd => { landed = hit(rd, () => this._damageRangedDummy(rd, BOW.damage)) || landed; });
+      if (this.emperor) landed = hit(this.emperor, () => this._hitEmperor(BOW.damage, {})) || landed;
+      if (landed) a.destroy();
     });
   }
 
@@ -5184,7 +5331,8 @@ class GameScene extends Phaser.Scene {
       saveProgress({ [openedKey]: true });
       this._playChestSequence(c.tag === 'A'
         ? { xpGain: 10, itemId: 'wooden_shield', itemTextureKey: 'item_wooden_shield' }
-        : { xpGain: 10, itemId: 'wooden_bow',    itemTextureKey: 'item_wooden_bow' });
+        : { xpGain: 10, itemId: 'wooden_bow',    itemTextureKey: 'item_wooden_bow',
+            arrows: { name: 'Basic Arrow', qty: QUIVER_SIZE } });
     } else {
       this.checkpointText.setVisible(true);
       this.time.delayedCall(1800, () => this.checkpointText.setVisible(false));
@@ -5539,6 +5687,10 @@ class GameScene extends Phaser.Scene {
     const result = window.statusSheet && window.statusSheet.award
       ? window.statusSheet.award(opts.itemId, 1) : false;
     const item = window.itemRegistry && window.itemRegistry.get(opts.itemId);
+    // A bow is no use without something to fire.
+    if (opts.arrows && window.statusSheet && window.statusSheet.addArrow) {
+      window.statusSheet.addArrow(opts.arrows.name, opts.arrows.qty);
+    }
 
     // Item sprite rises out of the chest.
     const tex = this.textures.exists(opts.itemTextureKey) ? opts.itemTextureKey : null;
@@ -6710,6 +6862,14 @@ class HUDScene extends Phaser.Scene {
       this._touchHiddenForDialog = dialogUp;
       if (dialogUp) (this._touchBtns || []).forEach(o => o.setVisible(false));
       else          this._applyTouchControlVisibility();
+    }
+
+    // Arrows carried, read from the sheet each frame so pickups and shots
+    // both show up without anything having to notify the HUD.
+    if (this.arrowCount) {
+      const st = window.statusSheet && window.statusSheet.getState();
+      const n = ((st && st.arrows) || []).reduce((a, r) => a + (Number(r.qty) || 0), 0);
+      if (this._shownArrows !== n) { this._shownArrows = n; this.arrowCount.setText(String(n)); }
     }
 
     // XP bar + level
