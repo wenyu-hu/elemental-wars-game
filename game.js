@@ -6602,8 +6602,16 @@ class HUDScene extends Phaser.Scene {
         const def = ELEMENT_DEFS[slot.element];
         if (s.element !== slot.element) {
           s.element = slot.element;
-          if (def) s.icon.setVisible(true).play(def.icon);
-          else     s.icon.setVisible(false);
+          if (def) {
+            s.icon.setVisible(true).play(def.icon);
+            // Frames aren't all 32x32 -- Lava's geyser is 32x64 -- so fit
+            // each icon to the slot on its longest side rather than
+            // trusting one scale to suit every element.
+            const fr = s.icon.frame;
+            s.icon.setScale((s.rect.height * 0.78) / Math.max(fr.width, fr.height));
+          } else {
+            s.icon.setVisible(false);
+          }
         }
         const onCooldown = def && slot.cooldownRemaining > 0;
         s.darken.setVisible(onCooldown);
