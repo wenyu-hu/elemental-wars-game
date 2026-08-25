@@ -2,8 +2,14 @@
 
 Working design doc. **Plain text = decided by Zhiming. *Italic with `?` = Claude's proposal, awaiting a ruling.***
 
-Nothing here is implemented. The four basics live in `ELEMENT_DEFS` in `game.js`; everything
-else is design only.
+**Implemented so far:** the four basics, plus Lava, Wind and Cloud — all in `ELEMENT_DEFS` in
+`game.js`, unlockable through the in-game tree with Booster Points. Everything else below is
+still design only.
+
+Three delivery types exist now, and new elements pick one: a **projectile** (Fire, Water, Air,
+Wind), a **geyser** that erupts at a fixed distance (`geyser: true` — Lava), or a placed
+**area** that hangs where you put it (`area: true` — Cloud). Tsunami's floor-sweep would be a
+fourth.
 
 ---
 
