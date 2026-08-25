@@ -859,6 +859,8 @@ class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('chest',         'assets/chest.png',  { frameWidth: 14, frameHeight: 16 });
     this.load.image('item_wooden_sword',  'assets/items/Sword.png');
     this.load.image('item_wooden_shield', 'assets/items/Shield.png');
+    // Frame 0 of the two-frame bow sheet (drawn) reads best as an icon.
+    this.load.spritesheet('item_wooden_bow', 'assets/items/Bow.png', { frameWidth: 32, frameHeight: 32 });
     this.load.image('ground',   'assets/blocks/ground.png');
     this.load.image('dirt',     'assets/blocks/dirt.png');
     this.load.image('platform', 'assets/platform.png');
@@ -5182,7 +5184,7 @@ class GameScene extends Phaser.Scene {
       saveProgress({ [openedKey]: true });
       this._playChestSequence(c.tag === 'A'
         ? { xpGain: 10, itemId: 'wooden_shield', itemTextureKey: 'item_wooden_shield' }
-        : { xpGain: 10 });
+        : { xpGain: 10, itemId: 'wooden_bow',    itemTextureKey: 'item_wooden_bow' });
     } else {
       this.checkpointText.setVisible(true);
       this.time.delayedCall(1800, () => this.checkpointText.setVisible(false));

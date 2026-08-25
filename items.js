@@ -138,6 +138,15 @@
   });
 
   defineItem({
+    id:      'wooden_bow',
+    name:    'Wooden Bow',
+    iconSrc: 'assets/items/Bow.png',
+    type:    'rangedWeapon',
+    rarity:  'common',
+    stats: { projectileSpeed: 520, reload: 1.2, specialities: '' },
+  });
+
+  defineItem({
     id:      'wooden_shield',
     name:    'Wooden Shield',
     iconSrc: 'assets/items/Shield.png',
