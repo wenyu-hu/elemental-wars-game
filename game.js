@@ -4555,9 +4555,10 @@ class GameScene extends Phaser.Scene {
     return best !== null ? best : fromY;
   }
 
-  // A placed area: several overlapping puffs so a 4-tile span reads as
-  // one cloud rather than one sprite stretched six times over.  Enemies
-  // standing inside stop tracking the player for as long as it lasts.
+  // A placed area: one cloud stretched across the whole span, so it reads
+  // as a single bank you step into rather than a row of separate puffs.
+  // Scaled from the painted pixels, not the frame, since the art sits in
+  // a corner of its 32x32 box.
   _placeArea(def) {
     const ps = this.player.sprite;
     const dir = ps.flipX ? 1 : -1;
@@ -4565,21 +4566,16 @@ class GameScene extends Phaser.Scene {
     const cx = ps.x + dir * (def.range || 3) * TS;
     const cy = ps.body.bottom - TS * 0.9;      // hangs at head height
 
-    const puffs = [];
-    const N = 3;
-    for (let i = 0; i < N; i++) {
-      const t = N === 1 ? 0.5 : i / (N - 1);
-      const px = cx - spanW / 2 + t * spanW;
-      const py = cy + (i % 2 ? 10 : -8);       // stagger so it isn't a row
-      const p = this.add.sprite(px, py, def.icon, 0)
-        .setScale(SCALE * (def.scale || 2)).setDepth(9).setAlpha(0);
-      p.play(def.icon);
-      this.tweens.add({ targets: p, alpha: 0.92, duration: 220 });
-      // Drift gently so it looks alive rather than pasted on.
-      this.tweens.add({ targets: p, x: px + (i % 2 ? 6 : -6), duration: 1800,
-                        yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-      puffs.push(p);
-    }
+    const cloud = this.add.sprite(cx, cy, def.icon, 0).setDepth(9).setAlpha(0);
+    cloud.play(def.icon);
+    // Fit the painted area to the span; the frame's transparent margin
+    // would otherwise make the cloud land short of its own zone.
+    const painted = this._paintedSize(def.icon);
+    cloud.setScale(spanW / painted.w);
+    this.tweens.add({ targets: cloud, alpha: 0.92, duration: 260 });
+    // A slow drift so it feels alive rather than pasted on.
+    this.tweens.add({ targets: cloud, x: cx + 8, duration: 2600,
+                      yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
 
     const zone = new Phaser.Geom.Rectangle(cx - spanW / 2, cy - TS / 2, spanW, TS);
     const area = { zone, unAggro: !!def.unAggro, until: this.time.now + (def.lingerMs || 4000) };
@@ -4590,9 +4586,39 @@ class GameScene extends Phaser.Scene {
       if (i >= 0) this._areas.splice(i, 1);
       // Anything it was hiding starts noticing the player again.
       [...(this.zombies || []), ...(this.guards || [])].forEach(e => { if (e) e._blind = false; });
-      this.tweens.add({ targets: puffs, alpha: 0, duration: 260,
-                        onComplete: () => puffs.forEach(p => p.destroy()) });
+      this.tweens.add({ targets: cloud, alpha: 0, duration: 280,
+                        onComplete: () => cloud.destroy() });
     });
+  }
+
+  // Painted (non-transparent) size of a texture's first frame, cached.
+  // Art rarely fills its frame, so scaling by frame size lands things
+  // short of where they should be.
+  _paintedSize(key) {
+    this._paintedCache = this._paintedCache || {};
+    if (this._paintedCache[key]) return this._paintedCache[key];
+    const tex = this.textures.get(key);
+    const fr = tex.frames[tex.getFrameNames()[0] ?? '__BASE'];
+    const img = tex.getSourceImage();
+    const cv = document.createElement('canvas');
+    cv.width = fr.cutWidth; cv.height = fr.cutHeight;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(img, fr.cutX, fr.cutY, fr.cutWidth, fr.cutHeight, 0, 0, fr.cutWidth, fr.cutHeight);
+    const d = ctx.getImageData(0, 0, fr.cutWidth, fr.cutHeight).data;
+    let minx = fr.cutWidth, maxx = -1, miny = fr.cutHeight, maxy = -1;
+    for (let y = 0; y < fr.cutHeight; y++) {
+      for (let x = 0; x < fr.cutWidth; x++) {
+        if (d[(y * fr.cutWidth + x) * 4 + 3] > 16) {
+          if (x < minx) minx = x; if (x > maxx) maxx = x;
+          if (y < miny) miny = y; if (y > maxy) maxy = y;
+        }
+      }
+    }
+    const out = maxx < 0
+      ? { w: fr.cutWidth, h: fr.cutHeight }
+      : { w: maxx - minx + 1, h: maxy - miny + 1 };
+    this._paintedCache[key] = out;
+    return out;
   }
 
   // Marks anything standing in an un-aggro area, so the enemy update can
