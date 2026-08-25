@@ -32,6 +32,11 @@ const ELEMENT_DEFS = {
   // flying — `geyser` switches _fireElementInSlot onto that path, where
   // `range` is where it lands rather than how far it travels.
   lava:  { icon: 'icon_lava',  damage: 5, range: 5,  reload: 5000, scale: 1.0, geyser: true, lingerMs: 1000, burst: [0xffd28a, 0xff6a1f, 0xd83c10, 0x8a1f08], burn: 2 },
+  // Air's evolution: heavier and longer-ranged, but a third of the fire
+  // rate, so Air stays the spam option.  Knockback is provisional -- the
+  // tier table for it is still unset, so 450 is just clearly above Air's
+  // 320.  The jump boost isn't wired yet.
+  wind:  { icon: 'icon_wind',  damage: 2, range: 8,  reload: 1500, speed: 480, scale: 1.5, burst: [0xffffff, 0xe6f4ff, 0xc9e4f7, 0xa9cfe8], knockback: 450 },
   earth: { icon: 'icon_earth', damage: 8, range: 15, reload: 5000, speed: 560, scale: 0.9, burst: [0xc9b083, 0x9c7f4e, 0x6f5a33, 0x4a3c22], hugsGround: true },
 };
 
@@ -862,6 +867,7 @@ class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('icon_earth', 'assets/elements/Earth.png', { frameWidth: 32, frameHeight: 32 });
     // Lava is a geyser, not a projectile — tall frames, not square ones.
     this.load.spritesheet('icon_lava',  'assets/elements/Lava.png',  { frameWidth: 32, frameHeight: 64 });
+    this.load.spritesheet('icon_wind',  'assets/elements/Wind.png',  { frameWidth: 32, frameHeight: 32 });
   }
 
   create() {
@@ -933,6 +939,7 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('icon_fire',     0xff5522, 2, 32, 32);
     makeSheet('icon_water',    0x3399ff, 3, 32, 32);
     makeSheet('icon_lava',     0xff6a1f, 2, 32, 64);
+    makeSheet('icon_wind',     0xffffff, 1, 32, 32);
     makeSheet('icon_air',      0xeeeeee, 1, 32, 32);
     makeSheet('icon_earth',    0x77aa44, 3, 32, 32);
   }
@@ -3816,6 +3823,7 @@ class GameScene extends Phaser.Scene {
     add('icon_air',   'icon_air',   0, 0, 6);
     add('icon_earth', 'icon_earth', 0, 2, 6);
     add('icon_lava',  'icon_lava',  0, 1, 8);
+    add('icon_wind',  'icon_wind',  0, 0, 6);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -5683,8 +5691,12 @@ class GameScene extends Phaser.Scene {
         .setInteractive({ useHandCursor: true }));
       const def = ELEMENT_DEFS[n.id];
       // Elements without art yet show their initial rather than nothing.
+      // Fit to the node box on the longest side, for the same reason the
+      // hotbar does: frames aren't all 32x32 any more.
+      const fitScale = (fr) => (BOX * 0.765) / Math.max(fr.width, fr.height);
       const icon = def && this.textures.exists(def.icon)
-        ? add(this.add.sprite(bx, by - 3 * U, def.icon, 0).setScale(1.1 * U))
+        ? add((sp => sp.setScale(fitScale(sp.frame) * U))(
+            this.add.sprite(bx, by - 3 * U, def.icon, 0)))
         : add(this.add.text(bx, by - 3 * U, n.label[0], {
             fontSize: fs(18), fontFamily: FONT, color: '#ffffff',
           }).setOrigin(0.5));
