@@ -50,6 +50,14 @@ const ELEMENT_DEFS = {
   // enemies standing in it lose track of you.  `area` picks that path,
   // where `range` is how far ahead it lands and `width` is how wide.
   cloud: { icon: 'icon_cloud', damage: 0, range: 3,  reload: 5000, scale: 2.2, area: true, width: 4, lingerMs: 4000, unAggro: true, burst: [0xffffff, 0xe8eef5, 0xd0d8e2, 0xb7b7b7] },
+  // Tsunami gathers at the edge of the view behind you, grows, then
+  // sweeps the whole floor.  `sweep` picks that path.  Using the Water
+  // sprite as a placeholder, stretched to the intended footprint rather
+  // than scaled uniformly — the motion and hitbox are what matter now,
+  // and the real art drops straight into the same box.
+  tsunami: { icon: 'icon_water', damage: 5, reload: 5000, sweep: true,
+             gatherMs: 900, wallW: 1.5, wallH: 2, speed: 520, knockback: 450,
+             burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd] },
   earth: { icon: 'icon_earth', damage: 8, range: 15, reload: 5000, speed: 560, scale: 0.9, burst: [0xc9b083, 0x9c7f4e, 0x6f5a33, 0x4a3c22] },
 };
 
@@ -4684,6 +4692,85 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  // Three beats: gather at the edge of the view behind the player, grow
+  // in place, then sweep the length of the floor in the facing direction.
+  // Everything it passes is hit once and shoved along with it.
+  _sweepWave(def) {
+    const ps = this.player.sprite;
+    const cam = this.cameras.main;
+    const dir = ps.flipX ? 1 : -1;
+    const viewW = this.scale.width / cam.zoom;
+    // Forms behind the player so it rolls past them and onward, rather
+    // than appearing in front and travelling away.
+    const edgeX = dir > 0 ? cam.scrollX - TS : cam.scrollX + viewW + TS;
+    const groundY = this._surfaceBelow(ps.x, ps.body.bottom);
+
+    const fullW = (def.wallW || 1.5) * TS;
+    const fullH = (def.wallH || 2)   * TS;
+
+    const w = this.physics.add.sprite(edgeX, groundY, def.icon, 0)
+      .setOrigin(0.5, 1).setDepth(11);
+    w.play(def.icon);
+    w.body.setAllowGravity(false);
+    w.body.setImmovable(true);
+    w.setFlipX(dir < 0);
+    // Grow from a ripple to the full wall.  Display size rather than
+    // scale, so the placeholder's proportions don't dictate the footprint.
+    w.setDisplaySize(fullW * 0.25, fullH * 0.25);
+
+    const struck = new Set();
+    let sweeping = false;
+
+    this.tweens.add({
+      targets: w, displayWidth: fullW, displayHeight: fullH,
+      duration: def.gatherMs || 900, ease: 'Quad.easeIn',
+      onComplete: () => {
+        sweeping = true;
+        w.body.setSize(fullW / w.scaleX, fullH / w.scaleY);
+        w.body.setVelocityX(dir * (def.speed || 520));
+      },
+    });
+
+    const mods = (SKINS.find(sk => sk.key === this._skin) || {}).mods || {};
+    const dmg = Math.round((def.damage || 5) * (mods.elementDamage || 1));
+    const opts = { knockback: def.knockback || 0, effectMul: mods.elementEffect || 1 };
+
+    const sweep = () => {
+      if (!w.active) return;
+      // Keep it standing on whatever floor it is crossing.
+      if (sweeping) {
+        const surf = this._surfaceBelow(w.x, w.y - 8);
+        if (surf != null) w.y = surf;
+      }
+      const wb = w.getBounds();
+      const hit = (e, fn) => {
+        if (!e || e.dead || struck.has(e) || !e.sprite) return;
+        if (!Phaser.Geom.Intersects.RectangleToRectangle(wb, e.sprite.getBounds())) return;
+        struck.add(e);
+        fn();
+      };
+      (this.zombies || []).forEach(z => hit(z, () => this._hitZombie(z, dmg, w.x, opts)));
+      (this.guards  || []).forEach(g => hit(g, () => this._hitGuard(g,  dmg, w.x, opts)));
+      (this.rangedDummies || []).forEach(rd => hit(rd, () => {
+        this._applyHitEffects(rd, opts); this._damageRangedDummy(rd, dmg);
+      }));
+      if (this.emperor) hit(this.emperor, () => this._hitEmperor(dmg, opts));
+
+      // Spent once it has crossed the view and left the far side.
+      if (sweeping) {
+        const past = dir > 0 ? w.x > cam.scrollX + viewW + TS * 2
+                             : w.x < cam.scrollX - TS * 2;
+        if (past) { timer.remove(); this._burstPixels(w.x, w.y - fullH / 2, def.burst); w.destroy(); }
+      }
+    };
+    const timer = this.time.addEvent({ delay: 50, loop: true, callback: sweep });
+
+    // Hard stop, so a wave that somehow never leaves can't live forever.
+    this.time.delayedCall((def.gatherMs || 900) + 6000, () => {
+      if (w.active) { timer.remove(); w.destroy(); }
+    });
+  }
+
   _eruptGeyser(def) {
     const ps = this.player.sprite;
     const dir = ps.flipX ? 1 : -1;
@@ -4893,6 +4980,7 @@ class GameScene extends Phaser.Scene {
 
     if (def.geyser) { this._eruptGeyser(def); return; }
     if (def.area)   { this._placeArea(def);   return; }
+    if (def.sweep)  { this._sweepWave(def);  return; }
 
     const ps = this.player.sprite;
     const dir = ps.flipX ? 1 : -1;
