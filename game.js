@@ -17,12 +17,15 @@ const TS    = TILE * SCALE;   // 96px display per tile
 // `scale` is a multiplier on SCALE for the projectile sprite — each
 // element's art fills its 32x32 frame differently, so a single shared
 // value made fire and water read as much smaller than air.
-// `hugsGround` spawns the shot at the player's feet and lets it ride
-// over floors (see _wireProjectileObstacles) instead of flying at chest
-// height — that's what makes the water shot look like a wave.
+// `hugsGround` spawns a shot at the player's feet and lets it ride over
+// floors instead of flying at chest height.  Nothing uses it today —
+// Water and Earth did, but a wave leaping off the player in mid-air and
+// then sweeping along the ground read as a glitch, and spawning right on
+// the surface made shots burst on the terrain the instant they appeared.
+// Kept because Tsunami's floor-sweep will want it.
 const ELEMENT_DEFS = {
   fire:  { icon: 'icon_fire',  damage: 3, range: 10, reload: 3000, speed: 380, scale: 1.2, burst: [0xffd28a, 0xffa640, 0xff6a1f, 0xd83c10], burn: 1 },
-  water: { icon: 'icon_water', damage: 2, range: 10,  reload: 2000, speed: 420, scale: 1.2, burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd], hugsGround: true, knockback: 160 },
+  water: { icon: 'icon_water', damage: 2, range: 10,  reload: 2000, speed: 420, scale: 1.2, burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd], knockback: 160 },
   // Air's art is only 8x8 inside its 32x32 frame, and the cropped hitbox
   // is that painted area — so this scale sets how forgiving Air is to aim
   // as well as how big it looks.  Dropped from 2.4 (57.6px) to 2.0 (48px)
@@ -47,7 +50,7 @@ const ELEMENT_DEFS = {
   // enemies standing in it lose track of you.  `area` picks that path,
   // where `range` is how far ahead it lands and `width` is how wide.
   cloud: { icon: 'icon_cloud', damage: 0, range: 3,  reload: 5000, scale: 2.2, area: true, width: 4, lingerMs: 4000, unAggro: true, burst: [0xffffff, 0xe8eef5, 0xd0d8e2, 0xb7b7b7] },
-  earth: { icon: 'icon_earth', damage: 8, range: 15, reload: 5000, speed: 560, scale: 0.9, burst: [0xc9b083, 0x9c7f4e, 0x6f5a33, 0x4a3c22], hugsGround: true },
+  earth: { icon: 'icon_earth', damage: 8, range: 15, reload: 5000, speed: 560, scale: 0.9, burst: [0xc9b083, 0x9c7f4e, 0x6f5a33, 0x4a3c22] },
 };
 
 // ─────────────────────────────────────────────
