@@ -184,6 +184,14 @@ What it rules out is knocking back a target that is *already* frozen.
 
 ## Balance notes worth keeping
 
+- **Basic elements are starter kit, not permanent picks.** They are expected to be superseded
+  once the tree opens up — so the no-strict-upgrades rule applies *between elements of similar
+  depth*, not between a basic and its own evolution. Water losing ground to Wind is fine.
+  Consequence to watch: the hotbar sorts shallowest-first, so obsolete basics will sit on keys
+  1-4 while the good elements drift to 5+. The planned loadout screen should let order be
+  chosen, not just membership.
+
+
 - **Destruction is held in check by having lower single-target DPS than Earth** (1.33 vs 1.6).
   If its reload ever drops, that is what breaks.
 - **Snow's reload is 6s specifically so Ice stays relevant** — at 3s, Snow had higher freeze
