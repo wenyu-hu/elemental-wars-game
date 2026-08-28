@@ -1296,6 +1296,7 @@ class GameScene extends Phaser.Scene {
     // reference from a previous life would survive a restart and every
     // shot would go into a destroyed group.
     this.arrows        = null;
+    this._treeOpen     = false;   // stale true would wedge the level-up screen
     this.chestL2A      = null;     // first chest (shield + element-pick)
     this.chestL2B      = null;     // second chest (checkpoint)
     this.movingPlatform = null;    // moving platform sprite
@@ -5356,8 +5357,12 @@ class GameScene extends Phaser.Scene {
     const openedKey = `level2Chest${c.tag}Opened`;
     const firstOpen = !this.registry.get(openedKey);
     if (firstOpen) {
+      // Registry now (stops a second open this session), but the *saved*
+      // flag waits until the reward actually lands -- persisting it here
+      // meant an interrupted cinematic left the chest permanently opened
+      // and empty, with the item never granted.
       this.registry.set(openedKey, true);
-      saveProgress({ [openedKey]: true });
+      this._pendingChestKey = openedKey;
       this._playChestSequence(c.tag === 'A'
         ? { xpGain: 10, itemId: 'wooden_shield', itemTextureKey: 'item_wooden_shield' }
         : { xpGain: 10, itemId: 'wooden_bow',    itemTextureKey: 'item_wooden_bow',
@@ -5720,6 +5725,13 @@ class GameScene extends Phaser.Scene {
     if (opts.arrows && window.statusSheet && window.statusSheet.addArrow) {
       window.statusSheet.addArrow(opts.arrows.name, opts.arrows.qty);
     }
+    // The reward is in hand, so it's now safe to record the chest as
+    // opened.  Quitting before this point leaves the chest re-openable
+    // rather than losing its contents.
+    if (this._pendingChestKey) {
+      saveProgress({ [this._pendingChestKey]: true });
+      this._pendingChestKey = null;
+    }
 
     // Item sprite rises out of the chest.
     const tex = this.textures.exists(opts.itemTextureKey) ? opts.itemTextureKey : null;
@@ -5831,7 +5843,9 @@ class GameScene extends Phaser.Scene {
   // Drawn in GameScene like the other overlays, so every coordinate is
   // scaled by 1/zoom to come out at its intended size.
   openElementTree(onClose) {
-    if (this._treeOpen) return;
+    // Never swallow the callback: whoever opened this is waiting on it to
+    // hand control back, and dropping it froze the player permanently.
+    if (this._treeOpen) { if (onClose) onClose(); return; }
     this._treeOpen = true;
     const W = this.scale.width, H = this.scale.height;
     const cam = this.cameras.main;
@@ -6074,6 +6088,16 @@ class GameScene extends Phaser.Scene {
     };
     // The tree draws above this screen and hands control back on close.
     btn.on('pointerup', () => this.openElementTree(finish));
+
+    // An escape that doesn't depend on the tree opening at all.  The
+    // point is already banked, and the tree is on the pause menu, so
+    // nothing is lost by spending it later.
+    const later = add(this.add.text(cx, cy + 78 * U, 'Later', {
+      fontSize: `${Math.round(11 * U)}px`, fontFamily: 'Arial, sans-serif',
+      color: '#c9d2e6',
+    }).setOrigin(0.5).setAlpha(0).setInteractive({ useHandCursor: true }));
+    this.tweens.add({ targets: later, alpha: 1, duration: 320 });
+    later.on('pointerup', finish);
   }
 
   reachPortal() {
