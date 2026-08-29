@@ -4668,8 +4668,8 @@ class GameScene extends Phaser.Scene {
       }
     }
     const out = maxx < 0
-      ? { w: fr.cutWidth, h: fr.cutHeight }
-      : { w: maxx - minx + 1, h: maxy - miny + 1 };
+      ? { x: 0, y: 0, w: fr.cutWidth, h: fr.cutHeight, frameH: fr.cutHeight }
+      : { x: minx, y: miny, w: maxx - minx + 1, h: maxy - miny + 1, frameH: fr.cutHeight };
     this._paintedCache[key] = out;
     return out;
   }
@@ -4727,7 +4727,13 @@ class GameScene extends Phaser.Scene {
     // Grow from a ripple to the full wall.  Display size rather than
     // scale, so the placeholder's proportions don't dictate the footprint.
     w.setDisplaySize(fullW * 0.25, fullH * 0.25);
-    w.y = floorY - w.displayHeight / 2;   // centre origin: sit it on the floor
+    // The art rarely reaches the bottom of its frame — Water's paint ends
+    // 10px short of 32 — so anchoring the frame leaves the visible wave
+    // hovering.  Sit the painted bottom on the floor instead.
+    const art = this._paintedSize(def.icon);
+    const paintedBottomOffset = () =>
+      w.displayHeight * ((art.y + art.h) / art.frameH) - w.displayHeight / 2;
+    w.y = floorY - paintedBottomOffset();
 
     const struck = new Set();
     let sweeping = false;
@@ -4756,7 +4762,7 @@ class GameScene extends Phaser.Scene {
       // lookup comes up empty rather than drifting.
       const surf = this._surfaceBelow(w.x, floorY - 8);
       if (surf != null) floorY = surf;
-      w.y = floorY - w.displayHeight / 2;
+      w.y = floorY - paintedBottomOffset();
       const wb = w.getBounds();
       const hit = (e, fn) => {
         if (!e || e.dead || struck.has(e) || !e.sprite) return;
