@@ -616,6 +616,7 @@ function skinUnlocked(key, progress) {
 
 const EW_ACCOUNTS_KEY          = 'ew_accounts';
 const EW_SESSION_KEY           = 'ew_session';
+const EW_GUEST_KEY             = 'ew_guest';
 const MAX_ACCOUNTS_PER_DEVICE  = 3;
 
 // djb2-ish hash — not crypto-secure, but avoids plaintext passwords in
@@ -676,15 +677,25 @@ function logIn(username, password) {
 
 function logOut() {
   setSessionUsername(null);
-  // Logging out drops you to guest — start that session clean.
+  // Logging out drops you to guest — start that run clean.
   for (const key of Object.keys(guestProgress)) delete guestProgress[key];
+  persistGuestProgress();
 }
 
-// Guests deliberately never touch localStorage, but their run still has
-// to hold together across scene restarts (level 1 → level 2, respawns).
-// This in-memory store lasts exactly as long as the page does, which is
-// the right lifetime for a guest session.
-const guestProgress = {};
+// A guest's run persists to its own localStorage key, kept apart from the
+// named accounts.  There is no server behind an account here -- it is a
+// named save slot on this browser -- so losing a guest's progress on
+// refresh cost them real work and bought them nothing.  A guest gets one
+// slot; signing up folds it into the account via migrateGuestProgress.
+const guestProgress = (() => {
+  try { return JSON.parse(localStorage.getItem(EW_GUEST_KEY) || '{}'); }
+  catch { return {}; }
+})();
+
+function persistGuestProgress() {
+  try { localStorage.setItem(EW_GUEST_KEY, JSON.stringify(guestProgress)); }
+  catch { /* private mode: the run still holds together in memory */ }
+}
 
 // Folds a guest run into the account just signed into.  Additive and
 // one-directional: booleans are OR'd and numbers take the higher value,
@@ -708,6 +719,7 @@ function migrateGuestProgress() {
   if (moved) saveProgress(update);
   // The run now belongs to the account; don't leave a copy behind.
   for (const k of Object.keys(guestProgress)) delete guestProgress[k];
+  persistGuestProgress();
   return moved;
 }
 
@@ -715,8 +727,9 @@ function migrateGuestProgress() {
 // the player replays without collecting the star).
 function saveProgress(update) {
   const name = getSessionUsername();
-  if (!name) {                            // guests: memory only
+  if (!name) {                            // guests: their own save slot
     Object.assign(guestProgress, update);
+    persistGuestProgress();
     return;
   }
   const accounts = loadAccounts();
@@ -1037,7 +1050,10 @@ class MenuScene extends Phaser.Scene {
     // Logged-in  → load their saved progress into the registry
     // Guest/none → wipe registry so the game starts clean
     const user     = currentUser();
-    const progress = user ? (user.progress || {}) : {};
+    // A guest's run is a save slot of its own now, so read theirs rather
+    // than an empty object -- otherwise the menu would show a guest as
+    // having no progress and no earned skins.
+    const progress = user ? (user.progress || {}) : guestProgress;
     // One-time migration: anyone who finished level 1 before the chest
     // cinematic existed is treated as having opened the chest already.
     // This stops them from re-running the cinematic and getting a free
@@ -1085,18 +1101,35 @@ class MenuScene extends Phaser.Scene {
     // on screen underneath the panel's BACK button.
     let menuHint = null;
 
-    if (user) {
+    // Not gated on `user` any more: guests keep their progress, so they
+    // get the skin picker too — a skin they earned is theirs to wear.
+    {
       const mainMenuObjects = [titleText, subtitleText];
-      mainMenuObjects.push(this.add.text(width/2, height/2 - 5, `Welcome back, ${user.username}!`, {
-        fontSize: '16px', fontFamily: '"Arial Black", Arial, sans-serif',
-        color: '#2d6a4f', stroke: '#ffffff', strokeThickness: 3
-      }).setOrigin(0.5));
-      mainMenuObjects.push(makeBtn(height/2 + 40,  'PLAY',    '#ff5722', '#e64a19', startGame));
-      mainMenuObjects.push(makeBtn(height/2 + 95,  'SKINS',   '#9c6ade', '#8148c9', () => showSkinPicker()));
-      mainMenuObjects.push(makeBtn(height/2 + 150, 'LOG OUT', '#8c8c8c', '#6c6c6c', () => {
-        logOut();
-        this.scene.restart();
-      }));
+      if (user) {
+        mainMenuObjects.push(this.add.text(width/2, height/2 - 5, `Welcome back, ${user.username}!`, {
+          fontSize: '16px', fontFamily: '"Arial Black", Arial, sans-serif',
+          color: '#2d6a4f', stroke: '#ffffff', strokeThickness: 3
+        }).setOrigin(0.5));
+        mainMenuObjects.push(makeBtn(height/2 + 40,  'PLAY',    '#ff5722', '#e64a19', startGame));
+        mainMenuObjects.push(makeBtn(height/2 + 95,  'SKINS',   '#9c6ade', '#8148c9', () => showSkinPicker()));
+        mainMenuObjects.push(makeBtn(height/2 + 150, 'LOG OUT', '#8c8c8c', '#6c6c6c', () => {
+          logOut();
+          this.scene.restart();
+        }));
+      } else {
+        mainMenuObjects.push(makeBtn(height/2 + 8,   'PLAY',    '#ff9800', '#ef6c00', startGame));
+        mainMenuObjects.push(makeBtn(height/2 + 56,  'SKINS',   '#9c6ade', '#8148c9', () => showSkinPicker()));
+        // Guests keep real progress now, so carry it onto the account
+        // instead of stranding it in guest storage.  Merge-max, so
+        // logging into an older account never downgrades it.
+        const claimThen = () => { migrateGuestProgress(); this.scene.restart(); };
+        mainMenuObjects.push(makeBtn(height/2 + 104, 'LOG IN',  '#3b9fff', '#1e7ae5', () => {
+          showAuthForm({ mode: 'login',  onSuccess: claimThen });
+        }));
+        mainMenuObjects.push(makeBtn(height/2 + 152, 'SIGN UP', '#4caf50', '#388e3c', () => {
+          showAuthForm({ mode: 'signup', onSuccess: claimThen });
+        }));
+      }
       this.input.keyboard.once('keydown-ENTER', startGame);
       this.input.keyboard.once('keydown-SPACE', startGame);
 
@@ -1256,17 +1289,6 @@ class MenuScene extends Phaser.Scene {
         mainMenuObjects.forEach(o => o.setVisible(true));
         if (menuHint) menuHint.setVisible(true);
       }
-    } else {
-      makeBtn(height/2 + 10, 'LOG IN', '#3b9fff', '#1e7ae5', () => {
-        showAuthForm({ mode: 'login',  onSuccess: () => this.scene.restart() });
-      });
-      makeBtn(height/2 + 58, 'SIGN UP', '#4caf50', '#388e3c', () => {
-        showAuthForm({ mode: 'signup', onSuccess: () => this.scene.restart() });
-      });
-      makeBtn(height/2 + 106, 'PLAY AS GUEST', '#ff9800', '#ef6c00', startGame);
-      // ENTER/SPACE default to "Play as Guest" when not logged in
-      this.input.keyboard.once('keydown-ENTER', startGame);
-      this.input.keyboard.once('keydown-SPACE', startGame);
     }
 
     menuHint = this.add.text(width/2, height-24,
