@@ -56,7 +56,7 @@ const ELEMENT_DEFS = {
   // than scaled uniformly — the motion and hitbox are what matter now,
   // and the real art drops straight into the same box.
   tsunami: { icon: 'icon_water', damage: 5, reload: 5000, sweep: true,
-             gatherMs: 900, wallW: 1.5, wallH: 2, speed: 520, knockback: 450,
+             gatherMs: 900, wallW: 2.25, wallH: 3, speed: 520, knockback: 450,
              burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd] },
   earth: { icon: 'icon_earth', damage: 8, range: 15, reload: 5000, speed: 560, scale: 0.9, burst: [0xc9b083, 0x9c7f4e, 0x6f5a33, 0x4a3c22] },
 };
@@ -4701,15 +4701,25 @@ class GameScene extends Phaser.Scene {
     const dir = ps.flipX ? 1 : -1;
     const viewW = this.scale.width / cam.zoom;
     // Forms behind the player so it rolls past them and onward, rather
-    // than appearing in front and travelling away.
-    const edgeX = dir > 0 ? cam.scrollX - TS : cam.scrollX + viewW + TS;
+    // than appearing in front and travelling away — but just *inside* the
+    // view, not beyond it.  Gathering off-screen meant the whole build-up
+    // was invisible and the wall simply arrived, which threw away the
+    // telegraph that makes the ability read.
+    const edgeX = dir > 0 ? cam.scrollX + TS : cam.scrollX + viewW - TS;
     const groundY = this._surfaceBelow(ps.x, ps.body.bottom);
 
     const fullW = (def.wallW || 1.5) * TS;
     const fullH = (def.wallH || 2)   * TS;
 
-    const w = this.physics.add.sprite(edgeX, groundY, def.icon, 0)
-      .setOrigin(0.5, 1).setDepth(11);
+    // Centre origin deliberately: with origin(0.5,1) the setSize below
+    // leaves the body anchored as if the origin were top-left, and the
+    // body then drags the sprite off the floor.  Anchoring by centre and
+    // deriving y from the surface each frame avoids that entirely.
+    const w = this.physics.add.sprite(edgeX, groundY, def.icon, 0).setDepth(11);
+    // Remembered so the wall keeps its footing where the lookup finds
+    // nothing -- it forms off the edge of the view, past the level's
+    // platforms, so the very first frame has no surface beneath it.
+    let floorY = groundY;
     w.play(def.icon);
     w.body.setAllowGravity(false);
     w.body.setImmovable(true);
@@ -4717,6 +4727,7 @@ class GameScene extends Phaser.Scene {
     // Grow from a ripple to the full wall.  Display size rather than
     // scale, so the placeholder's proportions don't dictate the footprint.
     w.setDisplaySize(fullW * 0.25, fullH * 0.25);
+    w.y = floorY - w.displayHeight / 2;   // centre origin: sit it on the floor
 
     const struck = new Set();
     let sweeping = false;
@@ -4727,6 +4738,8 @@ class GameScene extends Phaser.Scene {
       onComplete: () => {
         sweeping = true;
         w.body.setSize(fullW / w.scaleX, fullH / w.scaleY);
+        w.body.setOffset((w.width - fullW / w.scaleX) / 2,
+                         (w.height - fullH / w.scaleY) / 2);
         w.body.setVelocityX(dir * (def.speed || 520));
       },
     });
@@ -4737,11 +4750,13 @@ class GameScene extends Phaser.Scene {
 
     const sweep = () => {
       if (!w.active) return;
-      // Keep it standing on whatever floor it is crossing.
-      if (sweeping) {
-        const surf = this._surfaceBelow(w.x, w.y - 8);
-        if (surf != null) w.y = surf;
-      }
+      // Stand on whatever floor is under it -- during the gather as well
+      // as the sweep, since the wall grows and its base would otherwise
+      // creep upward as it does.  Keeps the last known floor when the
+      // lookup comes up empty rather than drifting.
+      const surf = this._surfaceBelow(w.x, floorY - 8);
+      if (surf != null) floorY = surf;
+      w.y = floorY - w.displayHeight / 2;
       const wb = w.getBounds();
       const hit = (e, fn) => {
         if (!e || e.dead || struck.has(e) || !e.sprite) return;
@@ -4760,7 +4775,7 @@ class GameScene extends Phaser.Scene {
       if (sweeping) {
         const past = dir > 0 ? w.x > cam.scrollX + viewW + TS * 2
                              : w.x < cam.scrollX - TS * 2;
-        if (past) { timer.remove(); this._burstPixels(w.x, w.y - fullH / 2, def.burst); w.destroy(); }
+        if (past) { timer.remove(); this._burstPixels(w.x, w.y, def.burst); w.destroy(); }
       }
     };
     const timer = this.time.addEvent({ delay: 50, loop: true, callback: sweep });
