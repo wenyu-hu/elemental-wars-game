@@ -60,7 +60,7 @@ const ELEMENT_DEFS = {
   tsunami: { icon: 'icon_water', damage: 5, reload: 5000, sweep: true,
              gatherMs: 900, wallW: 2.25, wallH: 3, speed: 520, knockback: 450,
              burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd] },
-  earth: { icon: 'icon_earth', damage: 8, range: 15, reload: 5000, speed: 560, scale: 0.9, burst: [0xc9b083, 0x9c7f4e, 0x6f5a33, 0x4a3c22] },
+  earth: { icon: 'icon_earth', groundLevel: true, damage: 8, range: 15, reload: 5000, speed: 560, scale: 0.9, burst: [0xc9b083, 0x9c7f4e, 0x6f5a33, 0x4a3c22] },
 };
 
 // ─────────────────────────────────────────────
