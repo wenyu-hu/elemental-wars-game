@@ -25,7 +25,9 @@ const TS    = TILE * SCALE;   // 96px display per tile
 // Kept because Tsunami's floor-sweep will want it.
 const ELEMENT_DEFS = {
   fire:  { icon: 'icon_fire',  damage: 3, range: 10, reload: 3000, speed: 380, scale: 1.2, burst: [0xffd28a, 0xffa640, 0xff6a1f, 0xd83c10], burn: 1 },
-  water: { icon: 'icon_water', damage: 2, range: 10,  reload: 2000, speed: 420, scale: 1.2, burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd], knockback: 160 },
+  // groundLevel: spawn so the painted bottom of the shot lands on the
+  // ground the player is standing on, instead of at chest height.
+  water: { icon: 'icon_water', groundLevel: true, damage: 2, range: 10,  reload: 2000, speed: 420, scale: 1.2, burst: [0x9be3ff, 0x5cc6ff, 0x2f8fff, 0x1f63dd], knockback: 160 },
   // Air's art is only 8x8 inside its 32x32 frame, and the cropped hitbox
   // is that painted area — so this scale sets how forgiving Air is to aim
   // as well as how big it looks.  Dropped from 2.4 (57.6px) to 2.0 (48px)
@@ -4644,6 +4646,15 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  // How far a sprite's painted bottom sits below its centre, once scaled.
+  // Art rarely reaches the bottom of its frame, so anchoring the frame
+  // leaves the visible shape hovering above wherever you meant to put it.
+  _paintedBottomOffset(sprite, iconKey) {
+    const art = this._paintedSize(iconKey);
+    const D = sprite.displayHeight;
+    return D * ((art.y + art.h) / art.frameH) - D / 2;
+  }
+
   // Painted (non-transparent) size of a texture's first frame, cached.
   // Art rarely fills its frame, so scaling by frame size lands things
   // short of where they should be.
@@ -4730,9 +4741,7 @@ class GameScene extends Phaser.Scene {
     // The art rarely reaches the bottom of its frame — Water's paint ends
     // 10px short of 32 — so anchoring the frame leaves the visible wave
     // hovering.  Sit the painted bottom on the floor instead.
-    const art = this._paintedSize(def.icon);
-    const paintedBottomOffset = () =>
-      w.displayHeight * ((art.y + art.h) / art.frameH) - w.displayHeight / 2;
+    const paintedBottomOffset = () => this._paintedBottomOffset(w, def.icon);
     w.y = floorY - paintedBottomOffset();
 
     const struck = new Set();
@@ -5037,6 +5046,10 @@ class GameScene extends Phaser.Scene {
     // projectiles collide with terrain.  Air opts out: its art is a tiny
     // 8x8 puff and the roomy full-frame box is what makes it land.
     if (def.fitBody !== false) this._fitBodyToTexture(pr, { frame: 0 });
+    if (def.groundLevel) {
+      pr.y = ps.body.bottom - this._paintedBottomOffset(pr, def.icon);
+      pr.body.updateFromGameObject();
+    }
     // Ground-huggers ride the surface the player is standing on rather
     // than flying at chest height.  Place, measure, then correct — that
     // lands the *visible* bottom on the ground whatever the art's
