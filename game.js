@@ -979,6 +979,12 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('player_gold',   0xffd700, 11, 18, 31);
     makeSheet('dummy',         0xcc4444, 2, 27, 25);
     makeSheet('zombie',        0x2f6b2f, 6, 32, 32);
+    // Button art does not exist yet, so this red 2-frame placeholder IS
+    // the button (frame 0 = raised, frame 1 = pressed).  When the real
+    // art lands, add the matching this.load.spritesheet('button', ...)
+    // in preload() -- do NOT add that line before the file exists: a 404
+    // takes down every asset queued behind it, element icons included.
+    makeSheet('button',        0xd63b3b, 2, 32, 32);
     makeSheet('zombie_butler', 0x1f4b2f, 6, 32, 32);
     makeSheet('golden_guard',  0xe8c33a, 3, 32, 64);
     makeImg  ('lightning_strike', 0x9be3ff, 32, 32);
@@ -1340,6 +1346,13 @@ class GameScene extends Phaser.Scene {
     this._hotbar = null;           // 10-slot element hotbar (rebuilt in create())
     this.zombies = null;           // EX-level zombies
     this.guards  = null;           // EX-level golden guards
+    // Level-2 button puzzle.  Cleared for the same reason as `arrows`:
+    // the scene object is reused across levels, so a button left over
+    // from level 2 would keep being arrow-tested on level 1 through a
+    // destroyed sprite.
+    this._button          = null;
+    this._bridgePlatforms = [];
+    this._arrowRestock    = null;
     this.lightningBolts = null;    // falling Golden Guard strikes
     this.foodDrops = null;         // butler food lying on the ground
     this.emperor = null;           // boss-room Golden Emperor
@@ -1358,7 +1371,7 @@ class GameScene extends Phaser.Scene {
   create() {
     // World width is per-level; height is shared so the camera and
     // floor math stays consistent across tutorials.
-    const WORLD_W   = (this._levelNum === 2)      ? 6336
+    const WORLD_W   = (this._levelNum === 2)      ? 7296
                     : (this._levelNum === 'ex')   ? 4800
                     : (this._levelNum === 'exboss') ? Math.round(this.scale.width / gameZoom())
                     : 5800;
@@ -1897,7 +1910,7 @@ class GameScene extends Phaser.Scene {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  //  Level 2 layout (TS = 96 px, worldW = 6336 = 66 tiles)
+  //  Level 2 layout (TS = 96 px, worldW = 7296 = 76 tiles)
   //
   //  Sections (left → right):
   //    0–2    spawn ground (floor level)
@@ -1909,9 +1922,15 @@ class GameScene extends Phaser.Scene {
   //    33–38  top safe ground (post-jump landing)
   //    33–49  floor-level ground sits directly BELOW 33–49 so the player
   //           can safely drop off the right edge of the top landing.
-  //           Drop area holds Ranged Dummy 2 + block sign.
+  //           Drop area holds Chest #2 (the bow), Ranged Dummy 2 and the
+  //           block sign.  The bow lands here because the button puzzle
+  //           downstream cannot be solved without it.
   //    50–52  small spike pit at floor, crossed via the Moving Platform
-  //    53–65  floor-level ground: Chest #2 (checkpoint) + portal at end
+  //    53–55  landing + arrow resupply on the lip of the big pit
+  //    56–64  BIG spike pit — uncrossable until the button is shot; the
+  //           bridge fades in across tiles 57/59/61/63 on press
+  //    65–75  far side: the button (tile 67), then a walk to the portal
+  //           at tile 74
   // ─────────────────────────────────────────────────────────────────
   // ─────────────────────────────────────────────────────────────────
   //  EX level (2nd-anniversary bonus level, reward = gold skin)
@@ -1957,7 +1976,22 @@ class GameScene extends Phaser.Scene {
     // Floor-level grass
     grass(0, 3, floorY);                 // spawn      (tiles 0–2)
     grass(33 * TS, 17, floorY);          // drop area  (tiles 33–49) — safe drop
-    grass(53 * TS, 13, floorY);          // chest 2    (tiles 53–65)
+    grass(53 * TS,  3, floorY);          // landing     (tiles 53–55)
+    grass(65 * TS, 11, floorY);          // far side    (tiles 65–75)
+
+    // ── Button-bridge over the big spike pit (tiles 56–64) ───────
+    // Built here but inert: invisible with its body disabled, so the
+    // pit is genuinely uncrossable until an arrow hits the button on
+    // the far side.  Created up-front rather than spawned on press so
+    // the static bodies are already registered with the collider that
+    // _wireProjectileObstacles sets up below.
+    const bridgeY = floorY - TS / 2 + 9;   // platform is 18px tall → top flush with the grass
+    this._bridgePlatforms = [57, 59, 61, 63].map(t => {
+      const p = plat(t * TS, bridgeY);
+      p.setVisible(false);
+      p.body.enable = false;
+      return p;
+    });
 
     // Top-level grass
     grass(14 * TS, 16, topY);            // top safe A (tiles 14–29)
@@ -2018,7 +2052,10 @@ class GameScene extends Phaser.Scene {
     // TOP-elevation gap over tiles 30–32 is itself a spike pit: failing
     // the precision jump drops the player four tiles onto these spikes.
     addRow(2 * TS + TS / 2, 33 * TS - TS / 2, spikeY);   // giant pit
-    addRow(49 * TS + TS / 2, 52 * TS + TS / 2, spikeY);  // small pit before chest 2
+    addRow(49 * TS + TS / 2, 52 * TS + TS / 2, spikeY);  // small pit before the landing
+    // Big pit (tiles 56–64) — the button-bridge puzzle.  Deliberately
+    // far too wide to jump: the only way over is the bridge.
+    addRow(55 * TS + TS / 2, 65 * TS - TS / 2, spikeY);
 
     // Spikes on TOP of each overhead duck-under platform (96px wide).
     const platTop      = overheadY - 9;
@@ -2083,8 +2120,10 @@ class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.chestL2A.sprite, this.platforms);
     this.physics.add.collider(this.player.sprite, this.chestL2A.sprite);
 
-    // ── Chest #2 (checkpoint, far end) ───────────────────────────
-    this.chestL2B = this._createChestL2(62 * TS, floorSurf - 40, 'B');
+    // ── Chest #2 (checkpoint) ────────────────────────────────────
+    // Sits early in the drop area, not at the far end: it holds the bow,
+    // and the button puzzle downstream is unsolvable without one.
+    this.chestL2B = this._createChestL2(38 * TS, floorSurf - 40, 'B');
     this.physics.add.collider(this.chestL2B.sprite, this.platforms);
     this.physics.add.collider(this.player.sprite, this.chestL2B.sprite);
 
@@ -2098,9 +2137,26 @@ class GameScene extends Phaser.Scene {
       if (ps.body.touching.down) this._riderOnMP = true;
     });
 
+    // ── Button + bridge puzzle ───────────────────────────────────
+    // The button sits on the far side of the big pit, reachable only by
+    // an arrow.  Shooting it drops the bridge in across tiles 57–63.
+    this._button = this._createButton(67 * TS, floorSurf - 48);
+
+    // Arrow resupply on the near lip of the pit.  The puzzle needs a hit
+    // to progress, and a quiver is finite, so without this a player who
+    // misses twenty times is softlocked with no way back across.  Tops
+    // the quiver back up to 5 rather than handing out unlimited arrows.
+    this._arrowRestock = this.physics.add.staticImage(54 * TS, floorSurf - 30, 'item_arrow')
+      .setScale(SCALE).setDepth(6);
+    this.physics.add.overlap(this.player.sprite, this._arrowRestock, () => {
+      const short = 5 - this._arrowCount();
+      if (short > 0 && window.statusSheet) window.statusSheet.addArrow('Basic Arrow', short);
+    }, null, this);
+
     // ── Level-2 portal at far end ───────────────────────────────
-    // Sits past chest 2.  Same overlap → reachPortal flow as level 1.
-    this.portal = this.createPortal(65 * TS - TS / 2, floorSurf - 48);
+    // Well past the button, so crossing the bridge is followed by a
+    // stretch of ground rather than dropping you straight onto the exit.
+    this.portal = this.createPortal(74 * TS, floorSurf - 48);
     this.physics.add.overlap(
       this.player.sprite, this.portal,
       () => this.reachPortal(), null, this
@@ -2120,6 +2176,36 @@ class GameScene extends Phaser.Scene {
 
     // Projectiles vs. the world.  Registered last because it needs the
     // chests / moving platform / portal to already exist.
+  }
+
+  // ── Arrow-activated button ─────────────────────────────────────
+  // Shaped like the other damageable entities ({ sprite, dead }) so the
+  // arrow sweep in _updateArrows can test it with the same `hit` helper.
+  // `dead` flips on press, which is what stops further arrows scoring.
+  //
+  // Deliberately arrow-only: element shots pass straight over it.  The
+  // player has had elements since level 1, so letting a fireball trip it
+  // would dissolve the puzzle into "press any attack".
+  _createButton(x, y) {
+    const sprite = this.physics.add.staticSprite(x, y, 'button').setScale(SCALE);
+    sprite.setFrame(0);
+    sprite.refreshBody();
+    return { sprite, pressed: false, dead: false };
+  }
+
+  _pressButton(btn) {
+    if (btn.pressed) return;
+    btn.pressed = true;
+    btn.dead    = true;
+    btn.sprite.setFrame(1);
+
+    // Bridge fades in left-to-right so the player reads it as a path
+    // forming, and can see where the footing lands before committing.
+    (this._bridgePlatforms || []).forEach((p, i) => {
+      p.setVisible(true).setAlpha(0);
+      p.body.enable = true;
+      this.tweens.add({ targets: p, alpha: 1, duration: 220, delay: i * 120 });
+    });
   }
 
   // Both projectile groups burst on the same set of solid things.  Uses
@@ -4156,6 +4242,15 @@ class GameScene extends Phaser.Scene {
           lines: ['Press ↓ or S to duck', 'and slip under spikes'] },
         // Floor drop area — by the second ranged dummy (tile 46)
         { x: 44 * TS, lines: ['Hold T or / to block', 'and reduce incoming damage'] },
+        // Near lip of the big pit (tile 54) — teaches the button puzzle.
+        // Sits before the pit edge so it is read while there is still
+        // room to stop and aim.
+        { x: 54 * TS, lines: [
+          'Hold R to draw your bow,',
+          'aim with the mouse,',
+          'and shoot the button',
+          'across the pit',
+        ] },
         // Secret star — floats 160px above it, the same gap level 1's
         // star sign uses.  Explicit y because the star hangs in the air
         // rather than sitting on a surface.
@@ -5018,6 +5113,7 @@ class GameScene extends Phaser.Scene {
       (this.guards  || []).forEach(g => { landed = hit(g, () => this._hitGuard(g,  BOW.damage, a.x, {})) || landed; });
       (this.rangedDummies || []).forEach(rd => { landed = hit(rd, () => this._damageRangedDummy(rd, BOW.damage)) || landed; });
       if (this.emperor) landed = hit(this.emperor, () => this._hitEmperor(BOW.damage, {})) || landed;
+      if (this._button) landed = hit(this._button, () => this._pressButton(this._button)) || landed;
       if (landed) a.destroy();
     });
   }
