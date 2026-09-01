@@ -2258,9 +2258,16 @@ class GameScene extends Phaser.Scene {
   _createButton(blockX, blockY) {
     const frames = this._buttonFrames();
     const sprite = this.physics.add.staticSprite(0, 0, 'button', frames[0]).setScale(SCALE);
-    // Cropped, so the sprite IS the art: sit its right edge flush against
-    // the block's face and its middle level with the block's centre.
-    sprite.setPosition(blockX - TS / 2 - sprite.displayWidth / 2, blockY);
+    // Quarter turn anticlockwise so the squash runs INTO the block.  The
+    // art compresses towards its own bottom edge (both frames share that
+    // edge); rotating by -90° points that edge at world +x, i.e. into the
+    // block's face, so the button is driven inwards by the arrow rather
+    // than pressed downwards across it.
+    sprite.setRotation(-Math.PI / 2);
+    // Cropped, so the sprite IS the art.  Rotated, its local +y axis runs
+    // along world x, so the flush edge sits half the *height* to the right
+    // of centre -- not half the width.
+    sprite.setPosition(blockX - TS / 2 - sprite.displayHeight / 2, blockY);
     sprite.refreshBody();
     return { sprite, frames, pressed: false, dead: false };
   }
