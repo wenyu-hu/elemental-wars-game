@@ -1929,7 +1929,8 @@ class GameScene extends Phaser.Scene {
   //    56–64  BIG spike pit — uncrossable until the button is shot.  A
   //           floating dirt block hangs over tile 60 three tiles up,
   //           with the button on its left face, in view from the near lip.
-  //           The bridge fades in across tiles 57/59/61/63 on press.
+  //           The bridge fades in across the pit on press, planks every
+  //           1.5 tiles so the fixed-impulse jump clears each gap.
   //    65–75  far side, then a walk to the portal at tile 74
   // ─────────────────────────────────────────────────────────────────
   // ─────────────────────────────────────────────────────────────────
@@ -1986,7 +1987,14 @@ class GameScene extends Phaser.Scene {
     // the static bodies are already registered with the collider that
     // _wireProjectileObstacles sets up below.
     const bridgeY = floorY - TS / 2 + 9;   // platform is 18px tall → top flush with the grass
-    this._bridgePlatforms = [57, 59, 61, 63].map(t => {
+    // Spaced every 1.5 tiles, not 2.  The jump is a fixed impulse --
+    // sqrt(2*g*TS), 1.13s airborne, 226px of reach at full run -- so with
+    // 96px planks and 96px gaps a jump taken at a plank's edge sailed
+    // clean over the next plank and landed in the gap past it.  Crossing
+    // meant jumping *early*, in a 62px window, four times running.  At
+    // 1.5-tile spacing the gaps are 48px and every takeoff point lands on
+    // some plank, so the natural jump works.
+    this._bridgePlatforms = [56.5, 58, 59.5, 61, 62.5, 64].map(t => {
       const p = plat(t * TS, bridgeY);
       p.setVisible(false);
       p.body.enable = false;
@@ -2000,11 +2008,10 @@ class GameScene extends Phaser.Scene {
     // shoot — you were aiming at something you could not see.  Here it
     // is 4-5 tiles from the near lip and plainly in view.
     //
-    // Sits over tile 60, which is a *gap* between bridge planks -- so the
-    // player jumps directly under it when crossing.  Three tiles up, not
-    // two: the jump impulse is sqrt(2*g*TS), i.e. exactly one tile, and
-    // at two tiles the head clearance was only 63px, so every crossing
-    // hop cracked into the block.  Three tiles gives 159px.
+    // Sits mid-pit, so the player passes under it when crossing.  Three
+    // tiles up, not two: the jump impulse is sqrt(2*g*TS), i.e. exactly
+    // one tile, and at two tiles the head clearance was only 63px, so
+    // every crossing hop cracked into the block.  Three tiles gives 159px.
     this._pitBlockX = 60 * TS;
     this._pitBlockY = floorY - TS / 2 - 3 * TS;
     this.platforms.create(this._pitBlockX, this._pitBlockY, 'dirt')
@@ -2158,7 +2165,7 @@ class GameScene extends Phaser.Scene {
     // Mounted on the left face of the floating dirt block, jutting out
     // towards the player so an arrow from the near lip strikes the
     // button before it reaches the block behind it.  Shooting it drops
-    // the bridge in across tiles 57–63.
+    // the bridge in across the pit.
     this._button = this._createButton(this._pitBlockX, this._pitBlockY);
 
     // Arrow resupply on the near lip of the pit.  The puzzle needs a hit
