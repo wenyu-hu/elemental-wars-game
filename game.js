@@ -1927,10 +1927,11 @@ class GameScene extends Phaser.Scene {
   //           downstream cannot be solved without it.
   //    50–52  small spike pit at floor, crossed via the Moving Platform
   //    53–55  landing + arrow resupply on the lip of the big pit
-  //    56–64  BIG spike pit — uncrossable until the button is shot; the
-  //           bridge fades in across tiles 57/59/61/63 on press
-  //    65–75  far side: the button (tile 67), then a walk to the portal
-  //           at tile 74
+  //    56–64  BIG spike pit — uncrossable until the button is shot.  A
+  //           floating dirt block hangs over tile 60 three tiles up,
+  //           with the button on its left face, in view from the near lip.
+  //           The bridge fades in across tiles 57/59/61/63 on press.
+  //    65–75  far side, then a walk to the portal at tile 74
   // ─────────────────────────────────────────────────────────────────
   // ─────────────────────────────────────────────────────────────────
   //  EX level (2nd-anniversary bonus level, reward = gold skin)
@@ -1992,6 +1993,23 @@ class GameScene extends Phaser.Scene {
       p.body.enable = false;
       return p;
     });
+
+    // ── Floating dirt block, mid-pit ─────────────────────────────
+    // Carries the button on its left face (mounted in
+    // _buildLevel2Entities).  The button used to sit on the far ground
+    // at tile 67, which is off-screen from where you actually stand to
+    // shoot — you were aiming at something you could not see.  Here it
+    // is 4-5 tiles from the near lip and plainly in view.
+    //
+    // Sits over tile 60, which is a *gap* between bridge planks -- so the
+    // player jumps directly under it when crossing.  Three tiles up, not
+    // two: the jump impulse is sqrt(2*g*TS), i.e. exactly one tile, and
+    // at two tiles the head clearance was only 63px, so every crossing
+    // hop cracked into the block.  Three tiles gives 159px.
+    this._pitBlockX = 60 * TS;
+    this._pitBlockY = floorY - TS / 2 - 3 * TS;
+    this.platforms.create(this._pitBlockX, this._pitBlockY, 'dirt')
+      .setScale(SCALE).refreshBody();
 
     // Top-level grass
     grass(14 * TS, 16, topY);            // top safe A (tiles 14–29)
@@ -2138,9 +2156,11 @@ class GameScene extends Phaser.Scene {
     });
 
     // ── Button + bridge puzzle ───────────────────────────────────
-    // The button sits on the far side of the big pit, reachable only by
-    // an arrow.  Shooting it drops the bridge in across tiles 57–63.
-    this._button = this._createButton(67 * TS, floorSurf - 48);
+    // Mounted on the left face of the floating dirt block, jutting out
+    // towards the player so an arrow from the near lip strikes the
+    // button before it reaches the block behind it.  Shooting it drops
+    // the bridge in across tiles 57–63.
+    this._button = this._createButton(this._pitBlockX - 60, this._pitBlockY);
 
     // Arrow resupply on the near lip of the pit.  The puzzle needs a hit
     // to progress, and a quiver is finite, so without this a player who
@@ -2187,7 +2207,9 @@ class GameScene extends Phaser.Scene {
   // player has had elements since level 1, so letting a fireball trip it
   // would dissolve the puzzle into "press any attack".
   _createButton(x, y) {
-    const sprite = this.physics.add.staticSprite(x, y, 'button').setScale(SCALE);
+    // Half SCALE: it reads as a nub on the block's face, not a slab the
+    // size of the block itself.  32x32 art renders at 48x48.
+    const sprite = this.physics.add.staticSprite(x, y, 'button').setScale(SCALE * 0.5);
     sprite.setFrame(0);
     sprite.refreshBody();
     return { sprite, pressed: false, dead: false };
@@ -4247,9 +4269,9 @@ class GameScene extends Phaser.Scene {
         // room to stop and aim.
         { x: 54 * TS, lines: [
           'Hold R to draw your bow,',
-          'aim with the mouse,',
-          'and shoot the button',
-          'across the pit',
+          'aim with the mouse, and',
+          'shoot the button on the',
+          'floating block',
         ] },
         // Secret star — floats 160px above it, the same gap level 1's
         // star sign uses.  Explicit y because the star hangs in the air
