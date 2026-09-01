@@ -888,6 +888,7 @@ class PreloadScene extends Phaser.Scene {
     this.load.spritesheet('player_gold',   'assets/skins/Main Character - Gold Skin.png',   { frameWidth: 18, frameHeight: 31 });
     this.load.spritesheet('dummy',         'assets/enemies/dummy.png',  { frameWidth: 27, frameHeight: 25 });
     this.load.spritesheet('zombie',        'assets/enemies/Zombie.png', { frameWidth: 32, frameHeight: 32 });
+    this.load.spritesheet('button',        'assets/Button.png', { frameWidth: 32, frameHeight: 32 });
     // Golden Guard frames are 32x64 — twice as tall as everything else.
     this.load.spritesheet('golden_guard',  'assets/enemies/Golden Guard.png', { frameWidth: 32, frameHeight: 64 });
     this.load.image('lightning_strike',    'assets/Blue Lightning Strike.png');
@@ -979,11 +980,9 @@ class PreloadScene extends Phaser.Scene {
     makeSheet('player_gold',   0xffd700, 11, 18, 31);
     makeSheet('dummy',         0xcc4444, 2, 27, 25);
     makeSheet('zombie',        0x2f6b2f, 6, 32, 32);
-    // Button art does not exist yet, so this red 2-frame placeholder IS
-    // the button (frame 0 = raised, frame 1 = pressed).  When the real
-    // art lands, add the matching this.load.spritesheet('button', ...)
-    // in preload() -- do NOT add that line before the file exists: a 404
-    // takes down every asset queued behind it, element icons included.
+    // Only reached if Button.png is missing; the real art is loaded in
+    // preload().  Never add a load for a file that is not there yet -- a
+    // 404 takes down every asset queued behind it, element icons included.
     makeSheet('button',        0xd63b3b, 2, 32, 32);
     makeSheet('zombie_butler', 0x1f4b2f, 6, 32, 32);
     makeSheet('golden_guard',  0xe8c33a, 3, 32, 64);
@@ -2160,7 +2159,7 @@ class GameScene extends Phaser.Scene {
     // towards the player so an arrow from the near lip strikes the
     // button before it reaches the block behind it.  Shooting it drops
     // the bridge in across tiles 57–63.
-    this._button = this._createButton(this._pitBlockX - 60, this._pitBlockY);
+    this._button = this._createButton(this._pitBlockX, this._pitBlockY);
 
     // Arrow resupply on the near lip of the pit.  The puzzle needs a hit
     // to progress, and a quiver is finite, so without this a player who
@@ -2206,20 +2205,71 @@ class GameScene extends Phaser.Scene {
   // Deliberately arrow-only: element shots pass straight over it.  The
   // player has had elements since level 1, so letting a fireball trip it
   // would dissolve the puzzle into "press any attack".
-  _createButton(x, y) {
-    // Half SCALE: it reads as a nub on the block's face, not a slab the
-    // size of the block itself.  32x32 art renders at 48x48.
-    const sprite = this.physics.add.staticSprite(x, y, 'button').setScale(SCALE * 0.5);
-    sprite.setFrame(0);
+  // Frames cropped to the painted pixels.  The art is an 18x7 pad adrift
+  // in a 32x32 frame, and arrows are tested against sprite.getBounds() --
+  // the frame rect, alpha and all -- so uncropped the button would swallow
+  // shots that visibly sail well over it.  Cropping the frame rather than
+  // the physics body is what actually moves getBounds().
+  //
+  // Both frames share ONE window (the union of their painted boxes) so
+  // switching to the pressed frame keeps the same rect: the shorter
+  // pressed art then sits at the bottom of that window and reads as the
+  // button squashing down, instead of the sprite resizing and jumping.
+  _buttonFrames() {
+    const tex = this.textures.get('button');
+    if (tex._tightFrames) return tex._tightFrames;
+
+    const img = tex.getSourceImage();
+    const FW = 32, FH = 32;
+    const n  = Math.max(1, Math.floor(img.width / FW));
+    const cv = document.createElement('canvas');
+    cv.width = img.width; cv.height = img.height;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const d = ctx.getImageData(0, 0, img.width, img.height).data;
+
+    let minx = FW, maxx = -1, miny = FH, maxy = -1;
+    for (let f = 0; f < n; f++) {
+      for (let y = 0; y < FH; y++) {
+        for (let x = 0; x < FW; x++) {
+          if (d[((y * img.width) + f * FW + x) * 4 + 3] > 16) {
+            if (x < minx) minx = x;
+            if (x > maxx) maxx = x;
+            if (y < miny) miny = y;
+            if (y > maxy) maxy = y;
+          }
+        }
+      }
+    }
+    if (maxx < 0) { minx = 0; miny = 0; maxx = FW - 1; maxy = FH - 1; }
+
+    const w = maxx - minx + 1, h = maxy - miny + 1;
+    const names = [];
+    for (let f = 0; f < n; f++) {
+      const key = `tight${f}`;
+      if (!tex.has(key)) tex.add(key, 0, f * FW + minx, miny, w, h);
+      names.push(key);
+    }
+    tex._tightFrames = names;
+    return names;
+  }
+
+  // Takes the centre of the dirt block and mounts itself on its left face.
+  _createButton(blockX, blockY) {
+    const frames = this._buttonFrames();
+    const sprite = this.physics.add.staticSprite(0, 0, 'button', frames[0]).setScale(SCALE);
+    // Cropped, so the sprite IS the art: sit its right edge flush against
+    // the block's face and its middle level with the block's centre.
+    sprite.setPosition(blockX - TS / 2 - sprite.displayWidth / 2, blockY);
     sprite.refreshBody();
-    return { sprite, pressed: false, dead: false };
+    return { sprite, frames, pressed: false, dead: false };
   }
 
   _pressButton(btn) {
     if (btn.pressed) return;
     btn.pressed = true;
     btn.dead    = true;
-    btn.sprite.setFrame(1);
+    btn.sprite.setFrame((btn.frames && btn.frames[1]) || btn.frames[0]);
 
     // Bridge fades in left-to-right so the player reads it as a path
     // forming, and can see where the footing lands before committing.
