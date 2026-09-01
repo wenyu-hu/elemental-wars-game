@@ -5047,10 +5047,19 @@ class GameScene extends Phaser.Scene {
   // Angle from the player to the mouse, in world space.
   _aimAngle() {
     const ps = this.player.sprite;
-    const p = this.input.activePointer;
-    const wx = p.worldX != null ? p.worldX : ps.x + 100;
-    const wy = p.worldY != null ? p.worldY : ps.y;
-    return Math.atan2(wy - ps.y, wx - ps.x);
+    const p  = this.input.activePointer;
+    // Before the mouse has ever moved the pointer sits at (0,0), which
+    // would aim up-and-left; fall back to the way the player faces.
+    if (!p || !p.moveTime) return ps.flipX ? 0 : Math.PI;
+    // pointer.worldX/worldY are NOT this camera's world space.  They hold
+    // whatever camera last processed the pointer -- here the HUD overlay's,
+    // which has no scroll and no zoom -- so they came back as raw canvas
+    // coordinates (worldX === x exactly).  Against a camera scrolled to
+    // x≈4900 and zoomed to 0.65 that pinned every shot to roughly -175°,
+    // which is why aim collapsed towards horizontal.  Transform through
+    // this scene's own camera instead.
+    const wp = this.cameras.main.getWorldPoint(p.x, p.y);
+    return Math.atan2(wp.y - ps.y, wp.x - ps.x);
   }
 
   // The bow itself, held in the aim direction and cycling frames as it's
