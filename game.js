@@ -382,6 +382,11 @@ const DOOR = {
 // One quiver of arrows.
 const QUIVER_SIZE = 20;
 
+// How far above its own bottom a floor-line shot (Water, Earth) can clash
+// with an enemy fireball.  Ranged dummies fire in a lane 33-54px above
+// the ground they stand on; 60 covers that with a little to spare.
+const GROUND_SHOT_CLASH_REACH = 60;
+
 // Bow: hold to draw, release to fire.  Range scales with how far it was
 // pulled, so a snap shot is short and a full draw carries.  Below
 // BOW_MIN_DRAW the shot is refused rather than dribbling out.
@@ -4536,6 +4541,18 @@ class GameScene extends Phaser.Scene {
           const step = dy > 0 ? Math.min(dy, 10) : dy;
           if (step !== 0) { pr.y += step; pr.body.updateFromGameObject(); }
         }
+        // Water and Earth ride the floor line, 11-22px under the lane
+        // enemy fireballs fly in, so their bodies never meet one.  Test a
+        // taller zone against fireballs only -- terrain and enemy hits
+        // still use the real body -- so they can still trade shots.
+        if (pr._clashReach && pr.active && this.fireballs) {
+          const b = pr.body;
+          const zone = new Phaser.Geom.Rectangle(
+            b.left, b.bottom - pr._clashReach, b.width, pr._clashReach);
+          const fb = this.fireballs.getChildren().find(f =>
+            f.active && Phaser.Geom.Intersects.RectangleToRectangle(zone, f.body));
+          if (fb) { this._onShotsCollide(pr, fb); return; }
+        }
         // Each shot has its own _maxX travel cap stored at spawn.
         if (pr._dir > 0 && pr.x > pr._maxX) pr.destroy();
         else if (pr._dir < 0 && pr.x < pr._maxX) pr.destroy();
@@ -5265,6 +5282,7 @@ class GameScene extends Phaser.Scene {
     if (def.groundLevel) {
       pr.y = ps.body.bottom - this._paintedBottomOffset(pr, def.icon);
       pr.body.updateFromGameObject();
+      pr._clashReach = GROUND_SHOT_CLASH_REACH;
     }
     // Ground-huggers ride the surface the player is standing on rather
     // than flying at chest height.  Place, measure, then correct — that
