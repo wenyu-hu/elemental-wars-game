@@ -2108,8 +2108,9 @@ class GameScene extends Phaser.Scene {
     //   Sprite 32×32, scale 3 → 96×96.  Sitting on top-safe surface
     //   means centre y = topSurf - 48.
     const rd1 = this._createRangedDummy(17 * TS, topSurf - 48);
-    // Dummy 2 — on floor-level drop area
-    const rd2 = this._createRangedDummy(46 * TS, floorSurf - 48);
+    // Dummy 2 — on floor-level drop area, at the near end so the walk
+    // back from the star is contested rather than empty.
+    const rd2 = this._createRangedDummy(38 * TS, floorSurf - 48);
     this.rangedDummies = [rd1, rd2];
 
     // Colliders so dummies sit on terrain (gravity-allowing → they
@@ -2145,9 +2146,9 @@ class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.player.sprite, this.chestL2A.sprite);
 
     // ── Chest #2 (checkpoint) ────────────────────────────────────
-    // Sits early in the drop area, not at the far end: it holds the bow,
-    // and the button puzzle downstream is unsolvable without one.
-    this.chestL2B = this._createChestL2(38 * TS, floorSurf - 40, 'B');
+    // Mid drop-area, swapped with ranged dummy 2.  Still well upstream of
+    // the button puzzle, which is unsolvable without the bow this holds.
+    this.chestL2B = this._createChestL2(46 * TS, floorSurf - 40, 'B');
     this.physics.add.collider(this.chestL2B.sprite, this.platforms);
     this.physics.add.collider(this.player.sprite, this.chestL2B.sprite);
 
@@ -4326,8 +4327,10 @@ class GameScene extends Phaser.Scene {
         // topLevel:true floats it above the elevated platform, not the floor.
         { x: 18 * TS, topLevel: true,
           lines: ['Press ↓ or S to duck', 'and slip under spikes'] },
-        // Floor drop area — by the second ranged dummy (tile 46)
-        { x: 44 * TS, lines: ['Hold T or / to block', 'and reduce incoming damage'] },
+        // Floor drop area — read on the way down, before ranged dummy 2
+        // (tile 38).  Follows the dummy when it moves: a "hold block"
+        // sign you only reach after being shot at teaches nothing.
+        { x: 35 * TS, lines: ['Hold T or / to block', 'and reduce incoming damage'] },
         // Near lip of the big pit (tile 54) — teaches the button puzzle.
         // Sits before the pit edge so it is read while there is still
         // room to stop and aim.
