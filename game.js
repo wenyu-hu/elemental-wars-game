@@ -5277,6 +5277,15 @@ class GameScene extends Phaser.Scene {
       pr.y += ps.body.bottom - pr.body.bottom;
       pr.body.updateFromGameObject();
     }
+    // The shot is born at chest height and the blocks above can move it
+    // down to the floor line.  Arcade syncs a sprite by *adding* the
+    // body's movement since prevFrame, so left stale that reads as a
+    // 35-46px drop the shot never made and applies it a second time --
+    // sinking Water and Earth into the ground, where the first overlap
+    // check bursts them.  Whether that lands before the check is frame
+    // timing, which is why it failed about half the time.
+    pr.body.prev.copy(pr.body.position);
+    pr.body.prevFrame.copy(pr.body.position);
   }
 
   // Fire keys '1'-'8' → hotbar slots 0-7. Edge-triggered so holding
